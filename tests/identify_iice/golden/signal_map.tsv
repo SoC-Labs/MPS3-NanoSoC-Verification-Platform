@@ -1,0 +1,10 @@
+name	width	radix	hw_path	sim_path
+haddr	32	hex	/tb/u_dut/haddr	tb.u_dut.haddr
+htrans	2	bin	/tb/u_dut/htrans	tb.u_dut.htrans
+hwrite	1	bin	/tb/u_dut/hwrite	tb.u_dut.hwrite
+hrdata	32	hex	/tb/u_dut/hrdata	tb.u_dut.hrdata
+hready	1	bin	/tb/u_dut/hready	tb.u_dut.hready
+state	3	bin	/tb/u_dut/state	tb.u_dut.state
+lockup	1	bin	/tb/u_dut/lockup	tb.u_dut.lockup
+trigger_marker	1	bin	__DERIVED__	__DERIVED__
+sample_clk	1	bin	/tb/u_dut/clk	tb.u_dut.clk

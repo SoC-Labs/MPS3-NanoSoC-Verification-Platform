@@ -1,0 +1,10 @@
+config BR2_PACKAGE_MPS3_DEBUG
+	bool "mps3-debug (the on-board GDB server)"
+	select BR2_PACKAGE_OPENOCD
+	help
+	  /usr/bin/mps3-debug up|down|status|version: OpenOCD ON the board,
+	  as the unprivileged openocd user, remote_bitbang to the harness's
+	  own 127.0.0.1:6921, GDB/telnet/Tcl bound to 127.0.0.1 (reached over
+	  the claim's SSH). Brings Buildroot's openocd with remote_bitbang
+	  and the SoC Labs ahb_qspi + hostio4 drivers (sw/patches/openocd),
+	  the target configs (host/openocd) and the design table.

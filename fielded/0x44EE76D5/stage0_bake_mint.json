@@ -1,0 +1,53 @@
+{
+  "baked_bit": {
+    "bytes": 13872413,
+    "name": "config_rm_greybox_stage0.bit",
+    "sha256": "8a30ade887b12713065e1cd1b7411520fc56bb9ffcda5f5439be48d97cebc7c5"
+  },
+  "base_bit": {
+    "name": "config_rm_greybox.bit",
+    "sha256": "9d1d4bd77278e24929342639ce840a89d746eb2d7bb3b60eb076015f316ba3c5"
+  },
+  "generated_at": "2026-09-25T01:29:12Z",
+  "generated_by": "fpga/dfx/tools/stage0_bake.py",
+  "mint_kind": "mint",
+  "note": "updatemem changed BRAM init frames only: UserID and USR_ACCESS are the base's, so every overlay keyed to this static stays valid (the length differs: the bitstream is compressed).",
+  "proc": "u_shell/shell_bd_i/microblaze_riscv_0",
+  "proc_endianness_in_mmi": null,
+  "schema": "mps3-stage0-bake",
+  "schema_version": "1",
+  "stage0_elf": {
+    "bytes": 232624,
+    "lmb_top": "0x1FE00",
+    "name": "stage0.elf",
+    "sha256": "e1a2172d79b4fb4017b8414dffafcf6118d3baf791cbb6bf7806a98b4e87ded9"
+  },
+  "stage0_elf_check": {
+    "baked_constants": {
+      "mps3_stage0_static_id": "0x44EE76D5",
+      "mps3_stage0_ver32": "0x01000000"
+    },
+    "entry": "0x0",
+    "free_below_lmb_top": 96676,
+    "load_top": "0x845C",
+    "machine": 243,
+    "stack_symbol": "_estack",
+    "stack_top": "0x1FE00"
+  },
+  "stage0_identity_checked": true,
+  "static_id": "0x44EE76D5",
+  "static_id_rederived": true,
+  "static_ltx": {
+    "name": "config_rm_greybox_static.ltx",
+    "sha256": "a1be5b9b55023398d0be03e2a34cf3d65286e93dc9fe8c32cc0f0f4983522e54",
+    "sidecar": "config_rm_greybox_static.ltx.json",
+    "sidecar_sha256": "e85958517216a373bac5ee0221266bce2a8220de61f9e96a1d3bc265c9f0cee3",
+    "uuids": [
+      "35988F4F3335580E8082F08D4B627CD0"
+    ]
+  },
+  "static_usercode": "0xFB1F8C76",
+  "usr_access": [
+    "0x01000000"
+  ]
+}

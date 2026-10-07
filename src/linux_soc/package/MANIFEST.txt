@@ -1,0 +1,605 @@
+========================================================================
+  Linux-on-MPS3 (MicroBlaze-V rv32 + DDR4) — board bring-up PACKAGE
+  MANIFEST
+========================================================================
+Generated : 2026-07-15 (package + runbook agent, final)
+Repo      : mps3-nanosoc-platform-linux   branch feat/linux-mps3-fabric
+Worktree  : <repo>
+Part      : xcku115-flvb1760-1-c  (Arm MPS3 carrier)
+Toolchain : Vivado 2026.1  (<EDA-install>/Xilinx/Vivado/2026.1)
+
+This directory is EVERYTHING needed to program and boot the SoC on a real
+MPS3. Every payload here is a byte-for-byte copy of a build artifact; the
+column "source" is where it was produced. Verify integrity with:
+    cd hw && sha256sum -c ../MANIFEST.sha256   # (see bottom of this file)
+
+------------------------------------------------------------------------
+ FRESHNESS GATE (the single most important check in this package)
+------------------------------------------------------------------------
+The bitstream MUST be the one built AFTER the c0_ddr4_aresetn dangling-reset
+fix. The pre-fix bitstream contains a DEAD-BOARD bug (DDR4 AXI slave held in
+reset forever; every CPU store swallowed). Proof this .bit is post-fix:
+
+    hw/linux_soc_wrapper.bit  built  2026-07-14 23:48:37   (source build)
+    src/.../hw/mbv_soc.tcl    mtime  2026-07-14 16:22:55   (the fixed BD)
+    => bitstream is NEWER than the fixed BD  ==> POST-FIX, safe to program.
+
+The pre-fix .bit/.xsa (built 14:52, dead-board bug) were quarantined by the
+build agent to  src/linux_soc/hw/build/STALE_PRE_DDR4FIX/  and are NOT in
+this package. Never program anything from that directory.
+
+========================================================================
+ HARDWARE  (package/hw/)  — program ONE of these to the FPGA
+========================================================================
+artifact : linux_soc_wrapper.bit
+role     : full-configuration bitstream (JTAG or MCC SD-card config)
+size     : 48251737 bytes
+sha256   : ff46cdabc8b403294e0c5fdeeaa234109599a57b1de30777e7d1729d46ccab85
+source   : src/linux_soc/hw/build/linux_soc_wrapper.bit
+built    : 2026-07-14 23:48:37 (Vivado 2026.1, write_bitstream, POST-FIX)
+
+artifact : linux_soc.xsa
+role     : hardware handoff (BD + embedded .bit) — input to Vitis/xsct,
+           and the source the device tree (mbv_soc.dts) was derived from
+size     : 1668874 bytes
+sha256   : 80b79f7cdb9fa36150c4c6bd12671c8981895e0bf80c7cd97aef29e2dea49145
+source   : src/linux_soc/hw/build/linux_soc.xsa
+note     : contains linux_soc.hwh AND linux_soc_smartconnect_ddr_0.hwh
+           (the DDR4 fix IS in the handoff) plus the fresh embedded .bit.
+
+========================================================================
+ SOFTWARE  (package/sw/)  — load to DDR4 after the FPGA is configured
+========================================================================
+Boot chain: OpenSBI (M-mode, @0x8000_0000) -> Linux Image (S-mode) ->
+            busybox initramfs. Load addresses are documented in the runbook
+            and encoded in mbv_soc.dts (/chosen, /memory).
+
+artifact : fw_jump.bin
+role     : OpenSBI firmware, RAW binary — load at 0x8000_0000, entry PC here
+size     : 268960 bytes
+sha256   : 59f670d23629f1ee698b2f6e4bc0d69d59d857023ee4ac6987f9c16fffc8df11
+source   : src/linux_soc/linux/artifacts/fw_jump.bin
+
+artifact : fw_jump.elf
+role     : same OpenSBI, ELF form — convenient for `xsct dow` (has entry addr)
+size     : 1525068 bytes
+sha256   : db54d8c7ce6d6badef67c17632817d375a4e7ad90c0923065052f6238693beb5
+source   : src/linux_soc/linux/artifacts/fw_jump.elf
+
+artifact : Image
+role     : Linux kernel (riscv32, Sv32), raw — load at 0x8200_0000
+size     : 31022592 bytes
+sha256   : 85373d6739cb1e2a1c27b0142c18a0d21a19cb439bf5a0b7b53919b53f030529
+source   : src/linux_soc/linux/artifacts/Image
+
+artifact : mbv_soc.dtb
+role     : device tree blob — load at 0x8800_0000; matches THIS bitstream's
+           address map (DDR4 0x8000_0000/1 GiB, uartlite 0x4060_0000, ...)
+size     : 6303 bytes
+sha256   : 176920a5d1f32ab9af2714ad1e01e2bea89aa29b51ef028951b859ad16d75114
+source   : src/linux_soc/linux/artifacts/mbv_soc.dtb
+
+artifact : mbv_soc.dts
+role     : device-tree SOURCE (human-readable; rebuild the .dtb with dtc)
+size     : 16247 bytes
+sha256   : d85fd4761026898ab08916f77187b84cfad09b73b45fa9c3176bd38acb81bff9
+source   : src/linux_soc/linux/artifacts/mbv_soc.dts
+
+artifact : rootfs.cpio.gz
+role     : initramfs (busybox) — load at 0x8400_0000 for an initrd boot;
+           referenced by /chosen linux,initrd-* in the DTB
+size     : 10389158 bytes
+sha256   : ee31071c4f4cbe8607f62c2059611b55c909cf9b9fb93e064e1293f601dfec88
+source   : src/linux_soc/linux/artifacts/rootfs.cpio.gz
+
+artifact : rootfs.ext2
+role     : block rootfs (alternative to the cpio; needs a block device — not
+           used by the default DDR-only boot, kept for a future SD/virtio path)
+size     : 125829120 bytes
+sha256   : bea5aa93929d321eb0799b208360b771a699e349dbc12e5f3674ea10318d6e8b
+source   : src/linux_soc/linux/artifacts/rootfs.ext2
+
+========================================================================
+ PROVENANCE / SW golden hashes
+========================================================================
+All package/sw hashes above were verified byte-identical to the golden list
+src/linux_soc/linux/artifacts/SHA256SUMS at staging time (7/7 MATCH).
+
+The sw stack (OpenSBI + Image + rootfs) is PROVEN to boot to a busybox login
+shell in QEMU (src/linux_soc/linux/qemu_boot.log: "PASS: booted to a busybox
+shell", SHELL_PROOF_42). The hw bitstream's DDR4 write path is PROVEN in
+BD+DDR4 co-sim (see docs/LINUX_MPS3_EVIDENCE.md). What is NOT yet proven is
+the two together on real silicon — that is the supervised board step.
+
+========================================================================
+ sha256 checklist (regenerate/verify)
+========================================================================
+To (re)verify the whole package:
+    cd package
+    sha256sum hw/linux_soc_wrapper.bit hw/linux_soc.xsa \
+              sw/fw_jump.bin sw/fw_jump.elf sw/Image sw/mbv_soc.dtb \
+              sw/mbv_soc.dts sw/rootfs.cpio.gz sw/rootfs.ext2
+and compare against the sha256 values recorded above.
+
+========================================================================
+ ADDENDUM 2026-07-16 (no-login-prompt diagnosis agent)
+========================================================================
+artifact : sw/mbv_soc_rescue.dtb
+role     : DIAGNOSTIC device tree for the 2026-07-16 board finding (Linux
+           boots to init, getty never prints a prompt). Byte-identical to
+           sw/mbv_soc.dtb except chosen/bootargs gains " init=/bin/sh".
+           busybox getty cannot emit its first prompt byte without a
+           working clockevent (it alarm(5)+tcdrain+usleep()s first); a
+           PID-1 /bin/sh has no such dependency and its prompt fits the
+           16-byte uartlite TX FIFO, so it comes up even with the timer
+           AND external interrupts dead. Load it at 0x8220_0000 in place
+           of mbv_soc.dtb; everything else in the recipe is unchanged.
+sha256   : d04489a4a7ac23d13d7a53e3435098434cd8113900836441e3e57a7564c0142a
+source   : src/linux_soc/linux/mk_dtb.sh (generated next to mbv_soc.dtb)
+runbook  : src/linux_soc/hw/build_dbg/LOGIN_FIX_README.md  <-- START HERE
+NOTE     : sw/mbv_soc.dtb is byte-identical to the 2026-07-15 package
+           version (sha unchanged) -- the normal-boot DT was audited and
+           found correct; no functional DT change was made.
+
+========================================================================
+ ADDENDUM 2026-07-16 (wfi-coma workaround agent)
+========================================================================
+artifact : sw/Image_nowfi
+role     : PRIMARY LOGIN-FIX KERNEL. Identical Buildroot 6.18.7 build to
+           sw/Image plus patch 0002 (arch/riscv cpu_do_idle() returns
+           immediately instead of executing wfi). Root cause proven on
+           silicon 2026-07-16 by the fw_mspin discriminator: on this
+           MicroBlaze-V, a hart in wfi never wakes (not for interrupts,
+           not for debug halt), while the SAME interrupts deliver
+           perfectly into a busy loop. Every "dead interrupt" symptom
+           (no getty prompt, sstc STIP "never fires", SEIP "never
+           delivered") is explained by the idle wfi coma. Use with the
+           NORMAL sw/mbv_soc.dtb (sstc intact) -- recipe unchanged, only
+           the Image payload is substituted.
+size     : 31022592 bytes
+sha256   : db0acbf80b8a49a0406b8abd062589111fd03ab9609a15e59f7d16be8a10b5f7
+source   : src/linux_soc/linux/buildroot/output/images/Image, built
+           2026-07-16 21:39 with BR2_GLOBAL_PATCH_DIR =
+           src/linux_soc/linux/patches (patches applied to linux:
+           0001 uartlite poll mode [DT-gated, inert without the DT
+           property xlnx,rx-poll-ms], 0002 riscv no-wfi idle [always
+           on -- this is the fix]).
+proof    : QEMU -M virt regression PASS with this exact Image (root
+           login + shell commands; "Timer interrupt in S-mode is
+           available via sstc extension" still printed -- the sstc path
+           is intact). Kernel header image_size unchanged (0x1de4000),
+           so the 112 KiB kernel-end -> DTB margin asserted by mk_dtb.sh
+           is unaffected.
+runbook  : src/linux_soc/hw/build_dbg/WORKAROUND_BOOT_README.md
+NOTE     : sw/Image, sw/fw_jump.bin, sw/mbv_soc.dtb are byte-identical
+           to the previous package (shas unchanged). A DT-gated OpenSBI
+           M-mode AXI-timer driver (patches/opensbi/0001, "plan-C") is
+           stashed in-tree as fallback should un-comatose sstc STILL not
+           fire; it is NOT part of this recipe and the rebuilt fw_jump
+           was deliberately NOT packaged.
+
+========================================================================
+ ADDENDUM 2026-07-16 (plan-C activation: sstc STIP dead on silicon)
+========================================================================
+Board result with Image_nowfi: boot perfect through the rc scripts, still
+no getty prompt => with the wfi coma eliminated, sstc STIP is GENUINELY
+dead on silicon. M-mode MEIP delivery is proven (fw_mspin). The timer
+therefore moves to M-mode ("plan-C"). PRIMARY RECIPE is now:
+
+    fw_jump_sbitimer.bin + Image_nowfi + mbv_soc_sbitimer.dtb + rootfs.cpio.gz
+
+artifact : sw/fw_jump_sbitimer.bin
+role     : OpenSBI 1.6 fw_jump + patches/opensbi/0001 (fdt_timer_xlnx_
+           tmrctr): drives the AXI timer ch0 via AXI INTC In0 -> MEIP,
+           acks IAR, injects mip.STIP; AXI timer ch1 = free-running
+           timebase; FORCE-CLEARS OpenSBI's trap-probed Sstc detection
+           (load-bearing: CSR_STIMECMP probing SUCCEEDS on the broken
+           silicon, so dropping "sstc" from the DT alone would not stop
+           OpenSBI writing stimecmp). Driver binds ONLY when the timer
+           node carries soclabs,sbi-timer -- with the normal DTB this
+           binary behaves exactly like sw/fw_jump.bin.
+sha256   : e7fc061d9ebeb345e60d49b43aa473236aa504f5f77a45ab85ce25185987c1b7
+
+artifact : sw/mbv_soc_sbitimer.dtb          (+ _rescue variant)
+role     : normal mbv_soc.dtb with three edits (fdtput-derived by
+           linux/mk_dtb_sbitimer.sh, -p 4096 re-padded):
+           1) "sstc" dropped from riscv,isa-extensions (kernel uses SBI
+              set_timer; zicntr/rdtime clocksource kept),
+           2) timer node += soclabs,sbi-timer (OpenSBI driver opt-in),
+           3) uartlite += xlnx,rx-poll-ms = <20> (IRQ-less poll, code
+              already inside Image_nowfi; guards against dead SEIP and
+              keeps intc In1 silent so the M-mode handler cannot
+              livelock).
+           _rescue adds "rdinit=/bin/sh" (init= is ignored: the
+           initramfs contains /init).
+sha256   : b226ac5131587400f12cbd40190e8ea0d77c90d39f3495c6b7cd25527d6ae249
+           0f30d4a605643d03409e461d7752e3ee531751fcb092929934f39960412fc29a  (_rescue)
+
+proof    : FULL STACK reaches INTERACTIVE LOGIN on qemu 10.2
+           -M amd-microblaze-v-generic (same MMIO map, intc wired to
+           MEIP-only -- i.e. the exact M-mode path the board must take):
+           "Platform Timer Device: xlnx-tmrctr @ 100000000Hz", login
+           prompt, root shell, /proc/interrupts shows riscv-timer 3885
+           on RISC-V INTC 5 (injected STIP), sleep 1 returns, typed
+           commands echo through the polled uartlite. Log:
+           src/linux_soc/linux/qemu_mbv_planc.log
+runbook  : src/linux_soc/hw/build_dbg/WORKAROUND_BOOT_README.md (v2)
+
+========================================================================
+ ADDENDUM 2026-07-16 (plan-C v2: mute-console board window)
+========================================================================
+Board ran plan-C v1: console stopped dead right after the sched_clock
+line, hart alive with wandering kernel PCs. Off-board diagnosis:
+ - DTB exonerated: decompiled diff of mbv_soc_sbitimer.dtb vs mbv_soc.dtb
+   is EXACTLY the three intended edits; /chosen (stdout-path, console=)
+   untouched.
+ - uartlite TX-poll exonerated FOR THIS SYMPTOM: the next line after
+   sched_clock is earlycon-polled ("Console: colour dummy device 80x25",
+   QEMU transcript), printed long before the uartlite driver probes --
+   the mute predates any patched-driver involvement.
+ - Prime suspect: S-mode STIP interrupt storm -- mip.STIP unclearable
+   (or otherwise non-standard) on this core. Storm onset coincides with
+   the first tick after local_irq_enable(), i.e. sched_clock + <=1 tick,
+   and leaves the hart executing kernel text at full speed with zero
+   forward progress in start_kernel. QEMU's mip.STIP is fully writable,
+   which is why the identical bytes reach login there.
+Changes (v2, all in fw_jump_sbitimer.bin -- kernel and rx-poll DTB
+UNCHANGED):
+ - cross-AXI-slave write-flush ordering in the M-mode handler (timer
+   TINT clear read back before intc IAR ack; prevents ISR re-latch);
+ - spurious-MEIP storm guard (MEIE parked after 16 empty re-traps,
+   re-armed by the next sbi_set_timer);
+ - once-only M-MODE CONSOLE TRIPWIRES, visible even when the kernel is
+   mute: "first timer event delivered" breadcrumb, "mip.STIP will not
+   clear" (= storm diagnosis), "mip.STIP write did not stick"
+   (= injection diagnosis), "masked foreign intc irqs".
+New A/B artifact for the next window (load FIRST per coordinator):
+artifact : sw/mbv_soc_sbitimer_norxpoll.dtb
+role     : sbitimer DTB WITHOUT xlnx,rx-poll-ms (stock IRQ uartlite).
+           Discriminates the TX-poll suspect. NOT a daily driver: the
+           M-mode MEIP owner must CIE-mask the kernel-unmasked In1 on
+           its first assertion (single shared external pin), so expect
+           boot printks and possibly a stalling getty, with the
+           "masked foreign" line on the console.
+sha256   : 0ba969746bf6822ecb6c110813a930bd0adb3dd3a162c1884c4241546e90b5ae
+fw_jump_sbitimer.bin v2 sha256:
+           c2a68870020c4e27aeca605f00ad44a39931587e0ee4333cdbaac7524e6cdb41
+proof    : QEMU amd-microblaze-v-generic: v2 + rx-poll DTB still reaches
+           interactive login (riscv-timer=3507, sleep returns, shell
+           proof; linux/qemu_mbv_planc_v2.log); v2 + norxpoll DTB boots
+           to a visible login prompt with the predicted foreign-mask
+           warning and dead RX (model wires MEIP only;
+           linux/qemu_mbv_planc_norxpoll.log).
+
+========================================================================
+ ADDENDUM 2026-07-16 (PLAN-D: kernel-side AXI-timer tick over SEIP)
+========================================================================
+Plan-C board verdict (tripwires): MEIP + AXI timer + intc + injection all
+work, but mip.STIP is STUCK ONCE SET => every STIP-based tick (sstc AND
+SBI-injected) is unusable on this silicon. Plan-D removes STIP entirely:
+the kernel takes its tick from the AXI timer as a NORMAL S-mode external
+interrupt (SEIP) through the axi_intc.
+
+PRIMARY RECIPE (next window):
+    fw_jump.bin (PLAIN, flown, sha 59f670..) + Image_pland
+    + mbv_soc_pland.dtb + rootfs.cpio.gz
+(plain OpenSBI registers no irqchip handler and leaves mie.MEIE=0 -- it
+cannot claim or mask the intc; fw_jump_sbitimer.bin would also be inert
+without its DT opt-in, but load the plain one.)
+
+artifact : sw/Image_pland
+role     : Image_nowfi + patches/linux/0003: drivers/clocksource/
+           timer-soclabs-mbv.c, clockevent rating 300 on AXI timer ch0,
+           bound by compatible "soclabs,mbv-timer" ONLY (standard DTBs
+           and qemu-virt unaffected; -M virt regression re-run PASS).
+           Carries the SEIP discriminator printk:
+             "pland: first tick via SEIP delivered"
+sha256   : 3c3bce553b7e4eb592ae59305cd72ec293e87a0ad0dc85615f31dcf349d06cdb
+
+artifact : sw/mbv_soc_pland.dtb (+ _irquart, _rescue)
+role     : mbv_soc.dtb with: sstc dropped; timer compatible =
+           "soclabs,mbv-timer","xlnx,xps-timer-1.00.a"; uartlite
+           xlnx,rx-poll-ms=20 (belt+braces). _irquart drops the poll
+           property (stock IRQ uartlite -- the everything-works
+           candidate once SEIP is proven by the tick itself; no M-mode
+           pin owner exists in plan-D, so sharing is fine). _rescue
+           adds rdinit=/bin/sh. Generated by linux/mk_dtb_pland.sh.
+sha256   : 67eb0d2583f38b7a45c366bc032f3b1078bfc278f7b582fa2cc8d3be0b07a2bc
+           26dddfd702ac551d33bec8908a95dcac9890a147d80f4425eeea736339466020  (_irquart)
+           e959df3eacf7544921c60ab1b225d3462f7066ad874f64505df8b70db17630cb  (_rescue)
+
+proof/limits (honest): QEMU amd-microblaze-v-generic CANNOT deliver SEIP
+(intc wired to MEIP only), so the tick delivery is untestable off-board.
+Verified there instead: driver probes ("pland: S-mode clockevent on AXI
+timer @100000000Hz, irq 12"), maps intc input 0, arms the timer, and the
+boot then stalls tick-less WITHOUT the "first tick" line -- which is
+exactly the signature the board will show IF SEIP take is dead
+(linux/qemu_mbv_pland.log; ignore that log's frozen 0.000000 timestamps
+and the random_init WARN -- QEMU-only artifacts of rdtime trapping with
+plain fw, silicon rdtime is native). qemu -M virt regression with
+Image_pland: PASS (root shell).
+outcome  : "first tick via SEIP" + login => DONE (try _irquart next for
+           full IRQ operation). No "first tick" + tick-less stall =>
+           SEIP take is dead too => S-mode receives NO interrupts of any
+           kind; software options exhausted except NOMMU M-mode Linux
+           (heavy, last resort) or AMD fix. See WORKAROUND_BOOT_README.
+
+========================================================================
+ ADDENDUM 2026-07-16 (plan-D v2: the tick-death fix)
+========================================================================
+Plan-D board result: SEIP IS ALIVE ("pland: first tick via SEIP
+delivered" at 0.021 s) and ticks flowed for ~33 s of rc scripts -- then
+stopped (dmesg stamps bunch at 32.89, console froze mid-write, jiffies
+dead while rdtime advanced). Diagnosis: stale-latch loss in the level
+ack flow. handle_level_irq acks the intc IAR BEFORE the ISR runs; the
+ISR's T0INT source-clear is a posted AXI write, so the still-high input
+re-latches the axi_intc LVL_P bit (sticky until IAR). v1 relied on a
+spurious re-entry to flush that stale latch; real silicon timing loses
+that dance eventually (order 10^3..10^4 ticks) and the line wedges with
+no further edge for the latch to see = tick death.
+
+Fix (sw/Image_pland REPLACED, v2, sha ed3f9749..d7d7f23; DTBs
+unchanged): the ISR now uses the plan-C-v2-proven ack sequence in
+S-mode: W1C T0INT + READ BACK (source provably low), then an explicit
+IAR write scrubbing our own re-latched ISR bit + read back, so the late
+unmask always finds a clean latch -- deterministically one interrupt
+per tick. The extra IAR only W1Cs our own bit; kernel irq bookkeeping
+unaffected. The IRQ_NONE guard remains as a counted backstop.
+Instrumentation (once-only): "10 ticks via SEIP (spurious re-latch
+backstops: N)" and "2500 ticks via SEIP, tick engine stable" (~10 s at
+HZ=250 -- past the previous death point; if it prints, the fix held).
+Off-board proof limits (honest): the stale-latch race needs real AXI
+posted-write timing -- QEMU cannot reproduce it (and cannot deliver
+SEIP at all). Verified instead: qemu-virt regression PASS with this
+exact Image; QEMU-MBV probe path prints "latch scrub on" (intc mapped
+via interrupt-parent); image_size unchanged (112 KiB DTB margin holds).
+
+========================================================================
+ ADDENDUM 2026-07-17 (v5: In1/getty + poll-TX instrumentation, DIAG set)
+========================================================================
+Two-window verdict with Image_pland v2: the latch-scrub tick fix IS
+silicon-proven ("2500 ticks, tick engine stable, spurious:0"). Remaining
+defect is the console path: (A) rx-poll DTB freezes mid-write at the
+first big tty burst -- prime suspect is the v1 poll patch's UNBOUNDED
+drain loop spinning irqs-off with the port lock held; (B) irquart DTB
+completes rcS (tty TX via In1 worked!) then getty emits zero prompt
+bytes and RX is dead -- either In1 dies at the rcS->getty transition
+(port shutdown/re-open cycle) or getty itself wedges.
+
+sw/Image_pland REPLACED (v3, sha 4438d8f7..4ff7fc4d):
+ - poll drain loop BOUNDED (64 iters/period) -- any stuck-status wedge
+   degrades throughput instead of freezing the system;
+ - once-only tripwires: "ulite: first irq (stat=..)" (does In1 EVER
+   deliver to the kernel?), "ulite: poll engine alive", "ulite: poll
+   drain bound hit".
+
+NEW ZERO-INPUT DIAG SET (built by linux/mk_diag.sh):
+ - sw/rootfs_diag.cpio.gz (a634c697..) = stock rootfs + APPENDED cpio
+   segment (kernel unpacks concatenated archives; later files override):
+   /etc/init.d/S99diag dumps /proc/interrupts twice (10 s apart -> live
+   per-hwirq delta for In0/In1), stty -a, dmesg tail, and prints
+   PROMPTLESS_MARK -- no input, no getty needed; /etc/inittab override
+   replaces getty with a respawning /bin/sh (if RX works at all you get
+   an interactive root shell; getty eliminated as a variable).
+ - sw/mbv_soc_pland_diag.dtb (17e2ef85..) / _irquart_diag (9392d4a1..):
+   the two plan-D DTBs with linux,initrd-end RESTAMPED for the diag
+   rootfs (load rootfs_diag at the same 0x84000000; a stale end would
+   truncate the appended segment).
+Proof: full diag mechanism validated end-to-end on QEMU MBV (plan-C
+timer path): concatenated unpack clean, both dumps printed with rising
+riscv-timer counts, PROMPTLESS_MARK out, respawning shell answered
+typed input (no getty). qemu -M virt regression with v3: PASS.
+NEXT WINDOW: irquart_diag first (In1 question), pland_diag second
+(poll-TX question); runbook = WORKAROUND_BOOT_README v5.
+
+========================================================================
+ ADDENDUM 2026-07-17 (v6: getty root-caused; PROPER LOGIN set)
+========================================================================
+getty verdict (root cause, full write-up WORKAROUND_BOOT_README v6):
+busybox getty was never wedging on the uartlite. Its pre-prompt path has
+exactly one unbounded blocking call - get_logname()'s usleep(100ms)
+nanosleep, AFTER it has already switched the console to raw/no-echo -
+and both it and its alarm(5)+tcdrain rescue need a live S-mode
+CLOCKEVENT. A tick stall there = zero prompt bytes AND dead echo,
+byte-for-byte the window-B observation. The two hardware suspects are
+disproven by code: PID 1 keeps fds 0/1/2 on /dev/console forever, so
+the tty refcount never reaches zero across rcS->getty and
+ulite_shutdown()/free_irq()/CONTROL=0 NEVER runs; busybox 1.37 getty
+contains no vhangup() at all. No kernel change needed: Image_pland v3
+(sha 4438d8f7..) remains the flown kernel - there is no "Image v4".
+
+PROPER LOGIN SET (built by linux/mk_login.sh; root password "soclabs"):
+ - sw/rootfs_login.cpio.gz (05a48a45..) = stock rootfs + APPENDED cpio
+   segment: /etc/inittab runs "console::respawn:-/bin/login" (login's
+   first prompt byte is TIMER-INDEPENDENT: no nanosleep, no tcdrain -
+   the same property that made the diag /bin/sh work, but with real
+   /etc/shadow password auth + utmp); /etc/shadow root gets a SHA-512
+   hash; /etc/init.d/S99loginmon = zero-input forensics (interrupt
+   dumps at +20s/+40s and any getty/login wchan).
+ - sw/mbv_soc_pland_irquart_login.dtb (772b5581..)  <- PRIMARY
+ - sw/mbv_soc_pland_login.dtb         (1f446755..)  (rx-poll fallback)
+ - sw/mbv_soc_sbitimer_login.dtb      (64c6fd51..)  (plan-C fallback)
+   = the corresponding DTBs with linux,initrd-end restamped for
+   rootfs_login (load at the same 0x84000000).
+Proof: REAL AUTHENTICATED LOGIN on qemu 10.2 -M amd-microblaze-v-generic
+with the flown Image_pland v3 + fw_jump_sbitimer + sbitimer_login DTB:
+"mbv-linux login:" -> root + WRONG password REJECTED ("Login incorrect")
+-> root + "soclabs" -> uid=0(root) shell, LOGIN_PROOF_42, free OK
+(linux/qemu_mbv_login.log, driver linux/qemu_mbv_login_proof.py);
+zero-input boot shows LOGINMON dumps + the benign once-per-60s login
+re-prompt heartbeat (linux/qemu_mbv_loginmon.log).
+BOARD RECIPE: identical to the proven 2026-07-17 boot with TWO
+substitutions: rootfs_login.cpio.gz @0x84000000 and
+mbv_soc_pland_irquart_login.dtb @0x82200000 (fw_jump.bin PLAIN +
+Image_pland v3 unchanged). Expect "mbv-linux login:" ~35s after con;
+login as root/soclabs. Runbook: WORKAROUND_BOOT_README v6.
+
+========================================================================
+ ADDENDUM 2026-07-17 (v7: F4 CONSOLIDATION — the ONE canonical stack)
+========================================================================
+State of record (silicon, 2026-07-17 window): INTERACTIVE ROOT SHELL with
+free = 1 GiB on the flown stack; tick engine stable ("2500 ticks ...
+spurious: 0"); In1 TX+RX healthy. The workaround zoo below is now CLOSED:
+one canonical flight set, everything else is graded evidence/fallback.
+
+------------------------------------------------------------------------
+ CANONICAL FLIGHT SET — fly THIS, nothing else, via scripts/board_smoke.sh
+------------------------------------------------------------------------
+  hw/linux_soc_wrapper.bit               ff46cdab...  (flown 2026-07-14 build)
+  sw/fw_jump.bin        @0x8000_0000     59f670d2...  (PLAIN OpenSBI 1.6)
+  sw/Image_pland (v3)   @0x8040_0000     4438d8f7...  (no-wfi + SEIP tick)
+  sw/mbv_soc_pland_irquart_login.dtb
+                        @0x8220_0000     772b5581...  (canonical DT, below)
+  sw/rootfs_login.cpio.gz
+                        @0x8400_0000     05a48a45...  (/bin/login, root/soclabs)
+  regs: a0=0  a1=0x82200000  pc=0x8000_0000
+One-command program+boot+assert gate: scripts/board_smoke.sh (asserts
+login prompt, authenticated uid=0 shell, free > 900 MiB; written 2026-07-17,
+NOT yet exercised against a board).
+
+Pending promotions (each needs ONE proven board window, then update here):
+  * linux/artifacts/Image_pland v4 (a880303d..., productized 0003 driver,
+    quiet console) -> replaces v3 in sw/. Regression-proven off-board only.
+  * hw/build_wakeup bitstream (C_INTERRUPT_WAKEUP=1 golden rebuild)
+    -> replaces hw/linux_soc_wrapper.bit after the F1 window (see
+    docs/LINUX_MPS3_BRINGUP_RUNBOOK.md §9). If wfi wakes on it, kernel
+    patch 0002 (no-wfi) can be dropped -> stock-idle kernels become legal.
+
+------------------------------------------------------------------------
+ CANONICAL SOURCES (regenerate; never hand-edit derived artifacts)
+------------------------------------------------------------------------
+  BD      : src/linux_soc/hw/mbv_soc.tcl — C_INTERRUPT_WAKEUP=1 PINNED +
+            _assert_cfg'd (errata E1). NB the flown .bit predates this fix
+            (built 2026-07-14 with the default 0) — that is exactly why the
+            canonical kernel is a no-wfi build; the two workarounds are
+            redundant by design until the wakeup bitstream is board-proven.
+  DT      : src/linux_soc/linux/mbv_soc.dts (audited source of truth)
+            + mk_dtb.sh -> mbv_soc.dtb (stock, evidence baseline)
+            + mk_dtb_pland.sh -> pland DTBs   (timer compatible =
+              "soclabs,mbv-timer","xlnx,xps-timer-1.00.a"; sstc DROPPED from
+              riscv,isa-extensions per errata E2/E3; _irquart = stock IRQ
+              uartlite — the canonical console path)
+            + mk_login.sh -> *_login.dtb (initrd-end restamped) + rootfs_login.
+            CANONICAL DT == pland timer node + stock IRQ uartlite + no sstc
+            + login initrd-end = mbv_soc_pland_irquart_login.dtb.
+  Kernel  : buildroot 6.18.7 + patches/linux/0001 (uartlite poll, DT-gated —
+            INERT in the canonical DT), 0002 (no-wfi idle — required on the
+            flown wakeup=0 silicon), 0003 (soclabs-mbv AXI-timer SEIP
+            clockevent + in-tree binding doc carrying the errata record).
+  Firmware: stock OpenSBI 1.6 fw_jump (PLAIN). patches/opensbi/0001 is
+            plan-C evidence only.
+
+------------------------------------------------------------------------
+ SILICON ERRATA of record (all discriminator/tripwire-proven on the board)
+------------------------------------------------------------------------
+  E1  wfi never wakes when C_INTERRUPT_WAKEUP=0 (IP default) — not for
+      interrupts, not for debug halt. Fix: =1 in the BD (rebuild staged in
+      hw/build_wakeup, UNFLOWN) + kernel 0002 workaround (flown).
+  E2  Sstc stimecmp is dead: STIP never fires from stimecmp writes.
+  E3  mip.STIP is stuck-once-set: SBI-injected STIP ticks are impossible
+      too. E2+E3 => NO STIP-based clockevent can ever work on this silicon;
+      the tick is the AXI timer over SEIP (plan-D, driver 0003).
+  Healthy: MEIP, SEIP, mideleg delegation, rdtime (native), DDR4, uartlite
+      In1 TX+RX. Full history: hw/build_dbg/WORKAROUND_BOOT_README.md v1-v6.
+
+------------------------------------------------------------------------
+ DEPRECATION TABLE — retained as EVIDENCE / FALLBACK; DO NOT FLY by default
+------------------------------------------------------------------------
+  tier F (fallback, fly only per the WORKAROUND_BOOT_README v5/v6 decision
+          tables when the canonical boot regresses):
+    sw/mbv_soc_pland_login.dtb        rx-poll console fallback
+    sw/mbv_soc_sbitimer_login.dtb     plan-C timer fallback (+ fw_jump_sbitimer.bin)
+    sw/rootfs_diag.cpio.gz + sw/mbv_soc_pland{,_irquart}_diag.dtb
+                                      zero-input forensics set (v5)
+  tier E (evidence of the debug chain; superseded):
+    sw/Image                stock idle + sstc — HANGS at first idle on the
+                            flown silicon (E1+E2); QEMU-virt baseline only.
+                            Becomes flyable only after the F1 wakeup window.
+    sw/Image_nowfi          v1 workaround kernel (no tick fix) — superseded
+                            by Image_pland.
+    sw/fw_jump_sbitimer.bin plan-C M-mode timer (retired; inert without its
+                            DT opt-in "soclabs,sbi-timer").
+    sw/mbv_soc.dtb          stock DT — no usable clockevent on this silicon.
+    sw/mbv_soc_sbitimer{,_norxpoll,_rescue}.dtb   plan-C DT set.
+    sw/mbv_soc_pland{,_irquart,_rescue}.dtb       plan-D pre-login DT set.
+    sw/mbv_soc_rescue.dtb   init=/bin/sh diagnostic (bootarg ignored by
+                            initramfs — superseded by rescue2).
+    sw/mbv_soc_rescue2.dtb  rdinit=/bin/sh diagnostic. NOTE: this file was
+                            an undocumented stray from the 2026-07-16 window
+                            (no manifest entry, no generator note); it is
+                            mbv_soc_rescue.dtb with the corrected bootarg.
+                            Brought under MANIFEST.sha256 in this addendum
+                            (d4fbd187...).
+    sw/fw_jump.elf          NEVER load (vaddr 0x0 trap, runbook §1); kept
+                            only for tools needing an entry symbol.
+    sw/rootfs.cpio.gz       stock getty rootfs. Expected to work on the
+                            healthy tick (v6 §1) but UNPROVEN with getty on
+                            silicon; optional one-boot science, not the driver.
+    sw/rootfs.ext2          needs a block device; future SD/virtio path.
+  Deprecation is NOT deletion: every artifact above backs a documented
+  board observation or a decision-table branch. Do not delete; do not fly
+  outside its table row.
+
+------------------------------------------------------------------------
+ Runbook of record: docs/LINUX_MPS3_BRINGUP_RUNBOOK.md (consolidated §9-§10)
+ Evidence index   : docs/LINUX_MPS3_EVIDENCE.md (silicon phases appended)
+ Debug narrative  : src/linux_soc/hw/build_dbg/WORKAROUND_BOOT_README.md
+
+========================================================================
+ ADDENDUM 2026-07-17 (v8: getpass PASSWORD stall root-caused, login DTB fix)
+========================================================================
+Board result on the v6 login stack (irquart): prompt + "Password:" appear
+(v6 getty->login prompt fix confirmed), then getpass() stalls after
+"Password:" (hart alive, blocked in read). Root cause: canonical single-
+byte getpass read (libbb/bb_askpass.c keeps ICANON, clears only ECHO) over
+the irquart In1 path hits an edge-pulse-into-LEVEL-intc lost-interrupt race
+(a keystroke landing in the ulite_isr-drain -> IAR window leaves the char
+in the FIFO with no new edge) -- the In1 analog of the v4.1 In0 timer bug;
+racy, so username usually gets through and password hangs. crypt/auth are
+FINE (block is in read()).
+
+FIX (no rebuild, real /etc/shadow auth kept): run the LOGIN stack on the
+rx-poll DTB, whose 20 ms FIFO poll is immune to the race:
+  PRIMARY LOGIN =  fw_jump.bin + Image_pland + mbv_soc_pland_login.dtb
+                   + rootfs_login.cpio.gz   (root pw "soclabs")
+mbv_soc_pland_irquart_login.dtb is demoted to DIAGNOSTIC (exposes the race).
+
+PROOF (linux/qemu_login_pollproof.log): QEMU MBV, EXACT golden bytes
+(rootfs_login 05a48a45.., poll RX path), typed root+soclabs at "Password:"
+-> authenticated -> GOLDEN_AUTH_42 -> uid=0(root). Password entry completes
+end-to-end; canonical getpass over poll RX + SHA-512 shadow auth proven.
+Runbook detail: hw/build_dbg/WORKAROUND_BOOT_README.md v8.
+(Artifact bytes UNCHANGED from the v6/v7 package; this addendum only
+corrects which login DTB to fly. All shas in MANIFEST.sha256 still verify.)
+
+========================================================================
+ ADDENDUM 2026-07-17 (v9: PROPER In1 uartlite race fix -> Image_irqfix)
+========================================================================
+Silicon reality: BOTH login paths broken -- irquart = password-RX race
+(In1 edge-pulse into LEVEL-forced axi_intc), rx-poll = TX freeze mid-boot
+(v3 bounded drain did NOT cure it; QEMU synchronous MMIO hid both). DTB
+selection cannot escape it, so the STOCK uartlite driver is fixed.
+
+artifact : sw/Image_irqfix   (sha dc3156fe4da23aeff8dc817e5938e8cff7c41eb00bedf2981f8fedc31e130066)
+role     : Image_pland + patch linux/0004. ulite_isr, when the parent
+           axi_intc is mapped via the DT interrupt-parent, W1C-scrubs its
+           own intc IAR + read-back and re-checks RXVALID after the drain
+           loop, re-pulling any byte that arrived in the drain->unmask-IAR
+           window (irq-xilinx-intc's handle_level_irq IARs at unmask,
+           AFTER the ISR -> stranded byte with no fresh edge). Mirrors the
+           board-proven In0 timer fix. Keeps interrupt-driven TX (proven
+           on irquart). Superset of Image_pland (also boots rx-poll/plan-C
+           DTBs). image_size unchanged (112 KiB DTB margin holds).
+PRIMARY LOGIN (silicon-UNVERIFIED, needs one board window):
+  fw_jump.bin + Image_irqfix + mbv_soc_pland_irquart_login.dtb
+  + rootfs_login.cpio.gz   (root pw "soclabs")
+proof    : QEMU can't reproduce either silicon defect (synchronous MMIO),
+           so the RX fix is unverified off-board (confidence = axi_intc RTL
+           + board-proven In0 analog). QEMU DID confirm no regression:
+           virt login PASS; MBV poll-path password login PASS with
+           Image_irqfix (IRQFIX_AUTH_42, uid=0; linux/qemu_irqfix_pollproof.log);
+           scrub arms at probe on IRQ-mode uartlite ("In1 edge/level race
+           scrub armed (intc hwirq 1)"; linux/qemu_irqfix_probe.log).
+interim  : no-auth respawning /bin/sh (rootfs_diag) stays the shippable
+           proven interactive shell; milestone stands regardless.
+runbook  : hw/build_dbg/WORKAROUND_BOOT_README.md v9.

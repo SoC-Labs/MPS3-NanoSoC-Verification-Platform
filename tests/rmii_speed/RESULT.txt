@@ -1,0 +1,38 @@
+rmii_to_mii mode_speed bench -- VCS transcript
+bridge : $NANOSOC_MULTICORE_HOME/ethernet-subsystem-ahb/ethernet-mac-ahb/amba_wb_bridges/src/rtl/rmii_to_mii.v
+md5    : 5e38c43c
+VCS    : vcs script version : T-2022.06
+
+#### POSITIVE CONTROL (mode_speed=1) -- expect PASS ####
+Command: <repo>/tests/rmii_speed/./simv_pos +mode_speed=1 -l run_pos.log
+Chronologic VCS simulator copyright 1991-2022
+Contains Synopsys proprietary information.
+Compiler version T-2022.06-SP2_Full64; Runtime version T-2022.06-SP2_Full64;  Jul 10 15:43 2026
+
+RMII_SPEED: mode_speed=1  mrx_clk_period=40.0 ns  nibbles=48  sfd_at=16  recovered=16/16  errors=0  VERDICT=PASS
+RMII_SPEED: mrx_clk should be  40.0 ns (25 MHz, 100 Mb/s) when mode_speed=1
+RMII_SPEED:                   400.0 ns (2.5 MHz, 10 Mb/s) when mode_speed=0
+
+$finish called from file "<repo>/tests/rmii_speed/rmii_speed_tb.sv", line 181.
+$finish at simulation time             10260000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 10260000 ps
+CPU Time:      0.350 seconds;       Data structure size:   0.0Mb
+Fri Jul 10 15:43:09 2026
+
+#### DEFECT (mode_speed=0) -- expect FAIL ####
+Command: <repo>/tests/rmii_speed/./simv_def +mode_speed=0 -l run_def.log
+Chronologic VCS simulator copyright 1991-2022
+Contains Synopsys proprietary information.
+Compiler version T-2022.06-SP2_Full64; Runtime version T-2022.06-SP2_Full64;  Jul 10 15:43 2026
+
+RMII_SPEED: mode_speed=0  mrx_clk_period=400.0 ns  nibbles=5  sfd_at=-1  recovered=0/16  errors=16  VERDICT=FAIL
+RMII_SPEED: mrx_clk should be  40.0 ns (25 MHz, 100 Mb/s) when mode_speed=1
+RMII_SPEED:                   400.0 ns (2.5 MHz, 10 Mb/s) when mode_speed=0
+
+$finish called from file "<repo>/tests/rmii_speed/rmii_speed_tb.sv", line 181.
+$finish at simulation time             82260000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 82260000 ps
+CPU Time:      0.380 seconds;       Data structure size:   0.0Mb
+Fri Jul 10 15:43:12 2026

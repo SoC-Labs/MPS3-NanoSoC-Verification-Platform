@@ -1,0 +1,9 @@
+# Simulator artefacts from this bench's three elaborations (MODE=card /
+# fullgeom / control). `tests/.gitignore` already covers `sim_build_*/`,
+# `ucli.key` and the bare `results.xml`, but this bench writes a per-mode
+# results file so the three runs cannot overwrite each other's verdict.
+results_*.xml
+ucli.key
+*.log
+csrc/
+simv*

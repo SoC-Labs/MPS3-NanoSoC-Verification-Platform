@@ -1,0 +1,90 @@
+tests/hostio4_hotswap result
+captured: 2026-07-10 11:51 UTC  host: <build-host>  sim: vcs T-2022.06
+RTL: $(NANOSOC_M0_SOC_SRC)/nanosoc_arch_tech/rtl/hostio4 -- the tree nanoSoC is built from
+     (resolved as fpga/monolithic/filelist.tcl does; NOT the orphan m0plus tree)
+
+  compile OK  (RTL: $SOCLABS_NANOSOC_SOC_DIR/nanosoc_arch_tech/rtl/hostio4/target_rtl)
+  self-check OK: encoding matches the RTL (TXST+ioreq1 -> RXC1),
+                 the force takes, and TXST is a fixed point of (0,0)
+
+  Can a CONSTANT (ioreq1,ioreq2) park the target? (. = parks to TXST)
+
+            (0,0)      (0,1)      (1,0)      (1,1)
+    TXST    .          .          WEDGE:RXC1  WEDGE:RXDH
+    RXC1    WEDGE:RXC1  WEDGE:RXDH  WEDGE:RXC1  WEDGE:RXDH
+    RXDH    WEDGE:RXDL  WEDGE:RXDH  WEDGE:RXDL  WEDGE:RXDH
+    RXDL    WEDGE:RXDL  WEDGE:RXDZ  WEDGE:RXDL  WEDGE:RXDZ
+    RXDZ    .          WEDGE:RXDZ  WEDGE:TXSZ  WEDGE:RXDZ
+    TXSZ    .          .          WEDGE:TXSZ  WEDGE:TXSZ
+    TXCZ    WEDGE:TXDH  WEDGE:TXCZ  WEDGE:TXDH  WEDGE:TXCZ
+    TXDH    WEDGE:TXDH  WEDGE:TXDL  WEDGE:TXDH  WEDGE:TXDL
+    TXDL    .          WEDGE:TXDL  WEDGE:TXSZ  WEDGE:TXDL
+
+    (0,0) wedges 5 of 9 states
+    (0,1) wedges 7 of 9 states
+    (1,0) wedges 9 of 9 states
+    (1,1) wedges 9 of 9 states
+
+  RESULT: NO constant (ioreq1,ioreq2) parks the target from every
+          state. The FSM advances on ioreq2 TRANSITIONS, so a held
+          level cannot unwind it. ioack_o = fsm_state[0], so a
+          wedged target presents a stuck ack and will hang the next
+          DUT's first transaction after the swap.
+  PARK STATIC IMPOSSIBLE
+
+  Does toggling ioreq2 (with ioreq1 low) park it? finding minimum:
+    1 toggle(s):                 not yet
+    2 toggle(s):                 not yet
+    3 toggle(s): parks from ALL 9 states
+
+  PARK ESCAPE OK  min_toggles=3
+
+  iodata4 left FLOATING (z) by the decoupler -- does fsm_state go X?
+    (with ioreq2 LOW the outer ternary short-circuits, so the float is
+     never evaluated. The honest test is ioreq2 HIGH.)
+    ioreq=(0,0): no state goes X
+    ioreq=(0,1): 1 of 9 go X -> RXC1
+    ioreq=(1,0): no state goes X
+    ioreq=(1,1): 2 of 9 go X -> TXST RXC1
+
+    RXC1 branches on the RAW iodata4_i[0]; a `z` condition is not
+    `false` -- Verilog X-merges both arms. The decoupler must DRIVE
+    iodata4 to a defined value, not leave it undriven.
+  FLOAT UNSAFE
+
+  HARNESS REQUIREMENTS, all three measured above:
+   1. The DFX decoupler CANNOT park hostio4_target with any constant.
+      (0,0) is the best and still wedges 5 of 9 states. So the shell must
+      RESET the target on every swap -- or drive 3 ioreq2 toggles.
+   2. The decoupler must DRIVE iodata4, not leave it floating: with
+      ioreq2 high, RXC1 X-merges the state register off a 'z'.
+   3. It must hold ioreq1 LOW. Holding it high drags even an idle target
+      out of TXST into RXC1.
+
+  Why it bites: ioack_o = fsm_state[0], so a wedged target holds ack
+  asserted, and hostio4_link_cdc's neg_ack_stuck control proved a stuck
+  ack hangs the controller forever.
+
+  Confirmed on a LIVE link by L2b (make swap): the next DUT deadlocks
+  from exactly these 5 states, under either decoupler ioack value.
+  So the hang is INTERMITTENT -- it depends where the swap lands.
+  compile OK  (live-swap bench)
+== L2b: a DFX swap landing MID-TRANSACTION on a live link ==
+   left alone, the target deadlocks the next DUT from 5 of 9 states:
+  swap_none_RXDH_ack0      fails as required  -- phase-2: link stalled (no byte for 60000 C_clk)
+  swap_none_TXDH_ack0      fails as required  -- phase-2: link stalled (no byte for 60000 C_clk)
+   and the decoupler's ioack safe value rescues NOTHING -- the shipped
+   controller boots into OFFZ and emits no ioreq edges to unwedge it:
+  swap_none_RXC1_ack1      fails as required  -- phase-2: link stalled (no byte for 60000 C_clk)
+  swap_none_RXC1_ack0      fails as required  -- phase-2: link stalled (no byte for 60000 C_clk)
+   a state that is NOT a wedging state still recovers, as it must:
+  swap_none_TXSZ_ack0      PASS    (48385000 ps)
+   resetting the target makes it immune everywhere:
+  swap_treset_RXDH_ack1    PASS    (48615000 ps)
+  swap_treset_RXC1_ack1    PASS    (48575000 ps)
+   so does the ioreq2 escape sequence:
+  swap_escape_RXDH_ack1    PASS    (48695000 ps)
+
+  REQUIREMENT, now demonstrated on a live link: the shell must RESET
+  hostio4_target on every swap -- or drive the 3 ioreq2 escape toggles.
+  The decoupler's ioack safe value is irrelevant; it rescues nothing.

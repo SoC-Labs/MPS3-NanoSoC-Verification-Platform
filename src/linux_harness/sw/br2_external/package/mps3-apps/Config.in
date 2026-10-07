@@ -1,0 +1,13 @@
+config BR2_PACKAGE_MPS3_APPS
+	bool "mps3-apps"
+	help
+	  MPS3 Linux harness application layer (M5 app port):
+	    mps3-clcdd    — CLCD status display daemon (UIO "clcd" node;
+	                    silicon-proven HX8347-D config from
+	                    docs/CLCD_PANEL_FACTS.md; exits cleanly when
+	                    the block is absent, e.g. under QEMU)
+	    mps3-status   — one-shot boot-status surface (JSON to stdout
+	                    or /run/mps3/status.json; --text renders the
+	                    40x15 panel frame with no hardware)
+	    mps3-ovlstore — READ-ONLY overlay-store inspector (info/CRC
+	                    verify; no write flows exist — D16 embargo)

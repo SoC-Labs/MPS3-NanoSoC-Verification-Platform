@@ -1,0 +1,127 @@
+===============================================================================
+ LAYER-B integrated ethernet bench  —  tests/nanosoc_multicore_eth
+ The multicore-ethernet nanoSoC RM's ethernet + console across the DFX boundary
+ into the shell's virtual PHY + link partner, board-free, in simulation.
+===============================================================================
+ Generated from: make -C tests/nanosoc_multicore_eth SIM=vcs
+ Sim: VCS T-2022.06-SP2 | cocotb 2.0.1 | python3.10 (miniconda)
+ Verdict: TESTS=5 PASS=5 FAIL=0 SKIP=0   (make exit 0)
+
+-------------------------------------------------------------------------------
+ WHAT WAS STITCHED (the one integration gap this closes)
+-------------------------------------------------------------------------------
+ Each piece was already proven SEPARATELY:
+   * tests/rmii_conformance  — rmii_phy_if RMII di-bit wire conformance
+   * tests/eth_mac_subsystem — shell rmii_phy_if + link_partner_mac + bridge,
+                               with the BENCH playing the DUT MAC
+   * cocotb/soc_ethernet     — the REAL SoC MAC, but against a stand-alone
+                               tb_rmii_phy_model, not the shell's virtual PHY
+ The un-stitched path — the REAL RM (rp_nanosoc_multicore_wrapper, pulling in the
+ whole two-core ethernet nanoSoC) driving its RMII/MDIO/console PARTITION PINS
+ across a modelled DFX boundary into the SHELL's rmii_phy_if + mdio_phy_model +
+ link_partner_mac — is what this bench wires and exercises.
+
+ Topology:
+   cocotb AXIS (frames)  <-> link_partner_mac <-> rmii_phy_if <-[RMII pins]->
+     rp_nanosoc_multicore_wrapper (RM) -> nanosoc_multicore_soc (real MAC+M0+ x2)
+   cocotb (PHY reg model) <-> mdio_phy_model <-[MDC/MDIO pins]-> RM MDIO master
+   cocotb (byte monitor)  <- uart_tx AXIS <- RM uart_axis_shim <- CPU0 console
+ The DUT MAC is brought up over the SoC's external eth_ss_0 AHB test-slave port,
+ reached hierarchically through the RM (which ties that non-partition port off);
+ a cocotbext-ahb master deposits over the constant ties (VCS keeps the deposit) —
+ the exact MAC bring-up cocotb/soc_ethernet uses.  No custom firmware.
+
+-------------------------------------------------------------------------------
+ SUB-PROOFS  (money log lines)
+-------------------------------------------------------------------------------
+ (a) RX across the boundary ............................................ PASS
+     A 64-byte frame injected by link_partner_mac (cocotb AXIS) crossed
+     rmii_phy_if -> the RMII partition pins -> the real DUT MAC, raised
+     eth_irq (= the RM boundary irq_out) and its payload landed in
+     eth_scratch_rx SRAM (read back over eth_ss_0):
+       (a) MONEY: irq_out asserted — RX frame crossed the boundary
+       (a) scratch-RX first 64 bytes:
+           001a2b3c4d5e aabbccddeeff 0800 40414243..6d <fcs>
+       (a) MONEY: payload landed in eth_scratch_rx across the boundary
+     Neg baseline: irq_out low + a sentinel word in the buffer before injection.
+
+ (b) TX across the boundary ............................................ PASS
+     A frame the real DUT MAC transmitted crossed the RMII pins ->
+     rmii_phy_if -> link_partner_mac and was recovered BYTE-EXACT with a
+     valid FCS (link_partner_mac tuser/frame-err = 0):
+       (b) recovered 64 bytes (tuser/frame-err=0):
+           001a2b3c4d5e aabbccddeeff 0800 c0c1..dd <pad> f2223c63
+       (b) MONEY: DUT-TX frame recovered byte-exact + FCS valid across the boundary
+
+ (c1) MDIO crossing (bidirectional) ................................... PASS
+     The DUT MAC's MDIO master transaction crossed the boundary both ways: the
+     virtual PHY at strapped address 1 address-decodes + replies (non-0xFFFF),
+     an unpopulated address (2) is not answered (0xFFFF):
+       (c1) addr-1 PHYID1 read = 0x0007 ; addr-2 (unpopulated) = 0xffff
+       (c1) MONEY: MDIO crosses the boundary — addr-1 replies, addr-2 does not
+
+ (c2) MDIO PHY_ID value ............................................... PASS
+     The real DUT MAC now latches the correct PHY-ID — no per-register >>1 skew:
+       (c2) DUT MDIO read PHY_ID = 0x0007c0f1 (PHYID1=0x0007 PHYID2=0xc0f1)
+     >>> BENCH HEADLINE CATCH — FOUND, THEN FIXED (commit 1c96bd5) <<<
+     Original finding (the value of this integration bench): the shell virtual-PHY
+     MDIO model fpga/ethernet/mdio_phy_model/mdio_slave.sv drove read DATA starting
+     at bit_cnt==2 (after TWO turnaround bit-times), one MDC period LATE vs the REAL
+     OpenCores MAC MIIM (which captures the TA slot as the read's MSB and reads real
+     LAN8720 PHYs correctly on z2_03 silicon). So every 16-bit register read back as
+     value>>1 (PHYID1 0x0007 -> 0x0003, PHYID2 0xC0F1 -> 0x6078). Invisible to
+     tests/eth_mac_subsystem because its co-designed master (tests/common/
+     mdio_master.py::decode_read_reply) sampled the SAME late window — it only
+     surfaced when the ACTUAL DUT MAC drove the read (this bench).
+     Fix (1c96bd5): mdio_slave presents DATA[15] at bit_cnt==1 (single effective
+     turnaround), and the shared master takes the value from sampled indices [1:17].
+     tests/eth_mac_subsystem stays 9/9 green; c2 here is now a real pass.
+
+ (d) Console across the boundary ............ PASS (best-effort; NOT exercised)
+     The uart_axis_shim + uart_tx AXIS console boundary elaborates and is
+     monitored, but CPU0 emitted nothing (raw DUT serial never toggled over an
+     18 ms probe).  Root cause: CPU0 (network_core) is held by
+       cpu0_bootgate  (= chip_core_remap_ctrl_w[2] in the SoC top),
+     which the chip_core normally releases; here CPU1 runs only the idle preload
+     stub, so hello_uart never runs.  Releasing that bootgate board-free is a
+     multicore-boot concern orthogonal to this ethernet bench.  The console
+     crossing itself is proven separately (soc_multicore_banner / rm_uart_echo).
+
+-------------------------------------------------------------------------------
+ WHAT THE INTEGRATED PATH NOW PROVES  vs  WHAT IS STILL NOT COVERED
+-------------------------------------------------------------------------------
+ PROVES (new, board-free, in sim):
+   * The real RM's RMII TX + RX cross the modelled DFX partition boundary into
+     the shell's virtual PHY (rmii_phy_if) and back through link_partner_mac,
+     frame-accurate and byte-exact both directions, into/out of the real MAC's
+     DMA + scratch SRAM, with the live eth_irq surfacing on the RM boundary.
+   * The real RM's MDIO master transaction crosses the boundary bidirectionally
+     and is address-decoded by the shell's mdio_phy_model.
+   * The whole RM+SoC+shell-model stitch ELABORATES and runs under VCS.
+   * A genuine, previously-hidden virtual-PHY MDIO read-data turnaround bug
+     (mdio_slave one MDC period late vs the real MAC), FOUND then FIXED (1c96bd5)
+     — the class of stitch bug this integration bench exists to find.
+
+ NOT COVERED (honest scope):
+   * Console byte crossing is not exercised here (CPU0 bootgate held; needs the
+     chip_core release / a bootgate backdoor — out of scope).
+   * No real IP/ICMP/ARP: link_partner_mac is an L2 byte mover; real network
+     stack behaviour still needs PicoTCP (the DUT eth_netapp / eth_ping apps).
+   * No eth_bridge_3port in the datapath here (link_partner_mac AXIS is driven
+     directly); the 3-port bridge is covered by tests/bridge (3/3) and
+     tests/eth_mac_subsystem.
+   * SIMULATION ONLY — silicon of this RM-across-the-DFX-boundary path is still
+     pending (the DFX shell + this RM are proven in sim; not yet co-loaded on
+     KU115/PYNQ hardware for this exact stitched ethernet path).
+
+-------------------------------------------------------------------------------
+ FILES (new)
+-------------------------------------------------------------------------------
+   tests/nanosoc_multicore_eth/tb_nanosoc_multicore_eth.sv   (bench top)
+   tests/nanosoc_multicore_eth/test_nanosoc_multicore_eth.py (cocotb tests)
+   tests/nanosoc_multicore_eth/Makefile                      (flow)
+   tests/nanosoc_multicore_eth/RESULT.txt                    (this file)
+ Note: `make` runs the DUT's scripts/install_bootrom.sh smoke_remap, which
+ rewrites the DUT tree's shared bootrom stub (src/rtl/bootrom/eth_ss_bootrom.sv)
+ — identical shared-stub behaviour to cocotb/soc_ethernet; no Arm IP library edit.
+===============================================================================

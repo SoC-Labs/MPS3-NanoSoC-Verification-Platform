@@ -1,0 +1,25 @@
+Subject: [PATCH] DIAGNOSTIC ONLY: smsc911x: enable the driver's own WARN/TRACE
+
+Upstream hardcodes `#define USE_DEBUG 0` in smsc911x.h, which compiles every
+SMSC_WARN()/SMSC_TRACE() down to no_printk(). On the MPS3 Linux harness shell
+that made eth0 bring-up completely silent: no PHY/MDIO message ever reached the
+console, so we could not tell whether smsc911x_open() was failing loudly or not
+reaching those paths at all.
+
+Raise it to 2 so netif_warn()/netif_info() are emitted (still gated at runtime
+by the `debug` msg_enable module parameter, so boot with smsc911x.debug=16).
+
+DIAGNOSTIC ONLY -- drop this patch once eth0 bring-up is understood; it is not
+intended for the production image.
+
+--- a/drivers/net/ethernet/smsc/smsc911x.h
++++ b/drivers/net/ethernet/smsc/smsc911x.h
+@@ -26,7 +26,7 @@
+ 
+ #define TX_FIFO_LOW_THRESHOLD	((u32)1600)
+ #define SMSC911X_EEPROM_SIZE	((u32)128)
+-#define USE_DEBUG		0
++#define USE_DEBUG		2
+ 
+ /* This is the maximum number of packets to be received every
+  * NAPI poll */

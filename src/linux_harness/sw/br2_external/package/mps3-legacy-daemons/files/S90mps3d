@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# S90mps3d — start the harness control-plane daemons.
+#   mps3-ctrld : TCP 6900 JSON control (single-client, frozen contract)
+#   mps3-pushd : TCP 6910 bitstream push (single-session, frozen framing)
+#
+# static_id comes from /etc/mps3/static_id (build/board provisioning file;
+# 0x00000000 = "not provisioned", the firmware's weak default — replace at
+# image provisioning time or when a soclabs,static-id DT property lands).
+
+DAEMONS="mps3-ctrld mps3-pushd mps3-configd"
+
+start() {
+    for d in $DAEMONS; do
+        printf 'Starting %s: ' "$d"
+        start-stop-daemon -S -b -m -p "/var/run/$d.pid" \
+            -x "/usr/sbin/$d" -- -i /etc/mps3/static_id
+        [ $? -eq 0 ] && echo "OK" || echo "FAIL"
+    done
+}
+
+stop() {
+    for d in $DAEMONS; do
+        printf 'Stopping %s: ' "$d"
+        start-stop-daemon -K -q -p "/var/run/$d.pid"
+        [ $? -eq 0 ] && echo "OK" || echo "FAIL"
+        rm -f "/var/run/$d.pid"
+    done
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
+exit 0

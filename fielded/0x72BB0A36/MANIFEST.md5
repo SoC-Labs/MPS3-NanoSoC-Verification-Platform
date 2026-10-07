@@ -1,0 +1,39 @@
+# MANIFEST.md5 -- the fielded static shell 0x72BB0A36 (docs/FIELDED_SHELL.md), the 2026-10 ILA mint.
+#
+# `md5sum -c MANIFEST.md5` from inside this directory. Generated 2026-09-24 from the mint's build dir,
+# which lives in a DETACHED worktree, not in a normal checkout:
+#   <repo>/fpga/dfx/build_mint_2026_10/{prod,shell_proj}
+# and backed up by stage 8 to <hub-host>:<hub-home>/mints/0x72BB0A36/ (per-static since 987cf26).
+#
+# static_routed_locked.dcp is the one that matters: every future `make add-rm-*` against this shell
+# reads it, and without it no overlay can ever be added to the shell that is on the board.
+#
+# TWO flashable bases are listed, because the board carried both on 2026-09-24:
+#   config_rm_greybox_fw.bit      the mint's own stage-6 bake (firmware c8551081); fielded 08:40
+#   config_rm_greybox_fw_v011.bit the same base with firmware v0.11 (987cf264) baked in by updatemem,
+#                                 trialled volatile first; ON THE CARD since 09:40 -- THE FIELDED IMAGE
+# The ILA RMs' .ltx files are listed with their sidecars and the partial/clearing pair each describes:
+# an .ltx travels with its partial (docs/contracts/overlay-manifest.md, "ltx").
+#
+c308f0e58dd041219e3dace0f586f539  config_rm_dbg_demo.ltx
+c67a3e131e03f96a80d455b09bc98bdc  config_rm_dbg_demo.ltx.json
+6929d20acfc16fafa316bef9799a4042  config_rm_dbg_demo_pblock_rp_dut_partial.bin
+b35cc2e17af42220cabe642ce355e76d  config_rm_dbg_demo_pblock_rp_dut_partial_clear.bin
+f696577894081d2b528147f3f527b204  config_rm_greybox.bit
+ef61a5224ab2147044d12f67655c1610  config_rm_greybox.mmi
+bfb0f5e0b55bb41e01ff4e7a667f8f77  config_rm_greybox_fw.bit
+2a457f7ebd0b6099f1f7c8fb328c960c  config_rm_greybox_fw_v011.bit
+54f8e5794656fb32ff327f30eec664db  config_rm_greybox_routed.dcp
+2597aec48968077f84d143e9ef693eb3  config_rm_nanosoc_ila.ltx
+89f1c64cf271fba87dcf2baf4ae37366  config_rm_nanosoc_ila.ltx.json
+e57863e90dcb65902d7fd8af8cf05987  config_rm_nanosoc_ila_pblock_rp_dut_partial.bin
+9ab1fdbff6c94c380aeed3b7903791c6  config_rm_nanosoc_ila_pblock_rp_dut_partial_clear.bin
+613bc3892ce67ce43ba41c1989811211  mint.json
+dee1a80998d161309ad76fe2ee0f5186  overlay_inputs.txt
+26fec6bb6859098ac46f5949640c37e1  shell_fw.elf
+d1afc8beb86b831eb3a2e347a2b61530  shell_fw_v011.elf
+5d59addec8ee5006aa1765f2a57b3d24  shell_harness.xsa
+392aefe6ed628c6ebd0037cb201f8344  shell_static_synth.dcp
+eed3454117a8ad1d97b5dd44ba1c2e8d  static_id.txt
+7f81e8f57b908c075f9c595de7f9d43a  static_routed_locked.dcp
+c184b91cd3e68913c0fb5311df6fcb0e  static_stamp.json

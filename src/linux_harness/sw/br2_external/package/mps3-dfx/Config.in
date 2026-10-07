@@ -1,0 +1,19 @@
+config BR2_PACKAGE_MPS3_DFX
+	bool "mps3-dfx"
+	depends on BR2_LINUX_KERNEL
+	help
+	  Out-of-tree MPS3 shell DFX swap driver (mps3_dfx.ko), the
+	  /dev/mps3dfx chardev + fpga-mgr/fpga-bridge veneer the swap
+	  service (mps3-ctrld's swap worker) drives through the frozen
+	  ioctl sequence (SWAP_BEGIN -> clearing/partial push ->
+	  SWAP_FINISH). Sources in ../../drivers/icap/.
+
+	  LEGACY image variant only (DL6: harnessd drives ICAP through UIO
+	  in the default image). Installs /etc/init.d/S10mps3dfx +
+	  /etc/mps3/dfx.conf itself.
+
+	  Loaded at boot by /etc/init.d/S10mps3dfx; the mock-vs-MMIO
+	  backend is a deploy-time tech seam (/etc/mps3/dfx.conf).
+
+comment "mps3-dfx needs a Linux kernel to be built"
+	depends on !BR2_LINUX_KERNEL

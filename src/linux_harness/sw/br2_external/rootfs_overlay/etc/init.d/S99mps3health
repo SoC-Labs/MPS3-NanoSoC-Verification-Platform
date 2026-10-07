@@ -1,0 +1,89 @@
+#!/bin/sh
+#
+# S99mps3health — the image half of "healthy boot" (IMAGE_CONTRACT §8), the
+# last rcS script. Writes /run/mps3/boot-health, which harnessd reads before
+# the stage0 CONFIRMED write (linux_confirm = S0_CONFIRM_MAGIC ^ boot_count,
+# LMB 0x1FE98). An unconfirmed boot counts against its uSD slot in stage0, so
+# a slot image that comes up broken falls back to the other slot.
+#
+# healthy=1 <=> ALL of
+#   1. rcS reached this script;
+#   2. eth0 has at least one IPv4 address (the lease or the board identity's static address);
+#   3. dropbear listens on TCP 22;
+#   4. the uSD DRIVER path works: a card that is present produced
+#      /dev/mmcblk0 (S12mps3persist: storage=ok). A card whose FILESYSTEM is
+#      missing or unmountable is persist=degraded but still healthy — booting
+#      the other slot cannot fix a card's filesystem, whereas an image whose
+#      spi-usd/mmc_spi stack is broken must fall back.
+# harnessd adds its own half (one healthy service-table pass) before it
+# confirms (HARNESSD obligation, IMAGE_CONTRACT §8).
+#
+# IN THE BACKGROUND (2026-09-24), like S41mps3net: the verdict needs the
+# network settled, and waiting for it here would hold rcS -- and so harnessd's
+# first WDOG kick -- behind it. So this script returns at once; a subshell waits
+# (bounded, MPS3_NET_SETTLE_MAX) for S41's settled=1, then judges and writes
+# boot-health. Until then there is NO boot-health file: harnessd re-reads it
+# once a second and confirms only on healthy=1, exactly as before.
+
+RUN=/run/mps3
+OUT=$RUN/boot-health
+
+case "$1" in
+    start) ;;
+    *) exit 0 ;;
+esac
+
+MPS3_NET_SETTLE_MAX=30       # s: > S41's worst case (carrier 6 + DHCP 4 + DAD 2)
+
+judge() {
+i=0
+while ! grep -q '^settled=1' "$RUN/net.state" 2>/dev/null && [ $i -lt $((MPS3_NET_SETTLE_MAX * 5)) ]; do
+    sleep 0.2; i=$((i + 1))
+done
+grep -q '^settled=1' "$RUN/net.state" 2>/dev/null || reasons_pre=",net-not-settled"
+reasons="${reasons_pre:-}"
+healthy=1
+
+# 2. network
+if ip -4 addr show dev eth0 2>/dev/null | grep -q ' inet '; then
+    if grep -q '^dhcp=1' "$RUN/net.state" 2>/dev/null; then net=dhcp; else net=static; fi
+else
+    net=none; healthy=0; reasons="$reasons,no-ipv4"
+fi
+
+# 3. ssh (dropbear binds within a moment of S50 returning)
+ssh=0
+i=0
+while [ $i -lt 10 ]; do
+    if netstat -tln 2>/dev/null | grep -q ':22 '; then ssh=1; break; fi
+    sleep 0.2; i=$((i + 1))
+done
+[ $ssh = 1 ] || { healthy=0; reasons="$reasons,no-sshd"; }
+
+# 4. persist / storage path
+pst=$(cat "$RUN/persist.state" 2>/dev/null)
+case "$pst" in
+    *storage=failed*) persist=tmpfs; healthy=0; reasons="$reasons,usd-driver-path" ;;
+    backing=card*)    persist=card ;;
+    *reason=no-card*|*reason=cmdline*) persist=tmpfs ;;
+    backing=tmpfs*)   persist=degraded; reasons="$reasons,persist-${pst##*reason=}" ;;
+    *)                persist=degraded; reasons="$reasons,persist-unknown" ;;
+esac
+case "$persist" in degraded) reasons=$(echo "$reasons" | sed 's/ storage=[a-z]*//') ;; esac
+
+tmp=$OUT.tmp
+{
+    echo "healthy=$healthy"
+    echo "persist=$persist"
+    echo "net=$net"
+    echo "ssh=$ssh"
+    echo "reasons=${reasons#,}"
+    echo "uptime_s=$(cut -d' ' -f1 /proc/uptime)"
+} > "$tmp" && mv -f "$tmp" "$OUT"
+echo "mps3health: healthy=$healthy persist=$persist net=$net ssh=$ssh${reasons:+ reasons=${reasons#,}}"
+}
+
+mkdir -p "$RUN"
+rm -f "$OUT"                  # never a previous boot's verdict (tmpfs anyway)
+( judge ) < /dev/null &
+exit 0

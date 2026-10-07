@@ -1,0 +1,118 @@
+# Makefile.compare -- stream C targets, -include'd by tests/identify_iice/Makefile.
+#
+# Contract: INTERFACES.md §4 and §5.  The parent Makefile owns `clean`, `check`
+# and the .PHONY list for {fake-hw, compare, negctl}; ours is `clean-compare`
+# and the only extra .PHONY we declare is `hw-fsdb` (which the parent's list
+# does not cover).
+#
+# HERE / BUILD / GOLDEN / PYTHON / MANIFEST are exported by the parent.  The
+# defaults below only apply if this fragment is ever included standalone.
+
+HERE      ?= $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+BUILD     ?= $(HERE)/build
+PYTHON    ?= python3
+MANIFEST  ?= $(HERE)/signals_selftest.yaml
+
+COMPARE_SH    := $(HERE)/compare.sh
+SIGNAL_MAP    := $(BUILD)/signal_map.tsv
+SIM_FSDB      := $(BUILD)/sim_iice.fsdb
+HW_FSDB       := $(BUILD)/hw_iice.fsdb
+COMPARE_REPORT:= $(BUILD)/compare_report.txt
+
+.PHONY: hw-fsdb compare-help clean-compare pytest-compare identity \
+        check-identify-log pytest-provenance
+
+# --- phase 0: a synthetic hardware trace, no board and no Identify licence ---
+fake-hw: | $(BUILD)
+	@bash $(COMPARE_SH) fake-hw
+
+# --- the comparison.  FROZEN exit codes: 0 match / 1 mismatch / 2 harness ----
+# Deliberately NOT prefixed with '-': a mismatch or a harness error must fail
+# the make invocation.  A `;` or a `-` here is exactly how a broken gate ends up
+# reporting success (see the overlay-verify comment in the root Makefile).
+compare: | $(BUILD)
+	@bash $(COMPARE_SH) compare
+
+# --- the negative control: prove the comparator can FAIL ---------------------
+# This is the load-bearing target.  `compare` passing means nothing unless
+# `negctl` demonstrates that a one-bit difference is reported, that a missing
+# signal is a harness error, and that an unreadable FSDB is a harness error.
+negctl: | $(BUILD)
+	@bash $(COMPARE_SH) negctl
+
+# --- a REAL trace off the board.  Gated; never runs in CI --------------------
+# `signal-map` FIRST, and this is not cosmetic. compare.sh reads
+# $(BUILD)/signal_map.tsv, which is written by whichever manifest last ran
+# `gen` -- normally the SELFTEST one, via `make check`. So
+# `MANIFEST=<other> make hw-fsdb` used to normalise a real capture against the
+# WRONG signal set and fail with "signal(s) named in signal_map.tsv are absent
+# from the trace: ['haddr', ..., 'state']" -- naming selftest signals that were
+# never in the capture. Found 2026-07-30 while normalising the first silicon
+# trace. Regenerating the map from $(MANIFEST) makes the target honour the
+# manifest it was given.
+hw-fsdb: signal-map | $(BUILD)
+	@bash $(COMPARE_SH) hw-fsdb
+
+# Write $(BUILD)/signal_map.tsv from $(MANIFEST). Separate from the parent's
+# `gen` because that also runs the golden anti-drift diff, which is meaningless
+# for a non-selftest manifest (there is no golden for one).
+.PHONY: signal-map
+signal-map: | $(BUILD)
+	@$(PYTHON) $(HERE)/gen_mangle.py --manifest $(MANIFEST) --out $(BUILD)
+
+# --- provenance: what binds these artifacts together -------------------------
+# Board-free, tool-free and READ-ONLY: prints the manifest's instrumentation
+# identity, verifies build/signal_map.tsv really was generated from $(MANIFEST),
+# checks the manifest against the Identify instrumentation that was actually
+# BUILT (fpga/rp/nanosoc_iice/build/rev_1_identify/identify.log), and verifies
+# every artifact stamp it can find. Exit 2 on any conflict.
+#
+# Run this FIRST on board day. `MANIFEST=signals_nanosoc.yaml make identity` is
+# the one-second version of the 2026-07-30 question "does this manifest describe
+# what is in the bitstream?" -- it answers 69 vs 113 without a lease.
+identity: | $(BUILD)
+	@bash $(COMPARE_SH) identity
+
+# Just the manifest-vs-BUILT half. Degrades to a documented SKIP when there is no
+# instrumented build (a fresh clone has none); IICE_REQUIRE_IDENTIFY_LOG=1 turns
+# that skip into a harness error.
+check-identify-log:
+	@$(PYTHON) $(HERE)/provenance.py check-identify-log --manifest $(MANIFEST) \
+	   $(if $(IICE_IDENTIFY_LOG),--identify-log $(IICE_IDENTIFY_LOG),) \
+	   $(if $(IICE_REQUIRE_IDENTIFY_LOG),--require-iice,)
+
+# --- stream C unit tests: pure Python, no VCS and no Verdi needed ------------
+pytest-compare:
+	@cd $(HERE) && $(PYTHON) -m pytest tests/test_compare.py -q
+
+pytest-provenance:
+	@cd $(HERE) && $(PYTHON) -m pytest tests/test_provenance.py -q
+
+compare-help:
+	@echo "stream C (compare) targets:"
+	@echo "  fake-hw         synthesise build/hw_iice.fsdb from build/sim_iice.fsdb"
+	@echo "  compare         -> build/compare_report.txt   (exit 0 match / 1 mismatch / 2 harness)"
+	@echo "  negctl          NEGATIVE CONTROL: assert the comparator fails on a 1-bit flip"
+	@echo "  hw-fsdb         real board capture (needs IICE_ALLOW_HW=1 + lease + bitstream)"
+	@echo "  identity        PROVENANCE: manifest identity + signal_map + identify.log"
+	@echo "                  + artifact stamps (board-free, tool-free, read-only)"
+	@echo "  check-identify-log  just the manifest-vs-BUILT half"
+	@echo "  pytest-compare  stream C unit tests (no VCS, no Verdi)"
+	@echo "  pytest-provenance   provenance unit tests (no VCS, no Verdi)"
+	@echo ""
+	@echo "  IICE_NO_NCOMPARE=1  skip the nCompare cross-check"
+	@echo "  IICE_ALLOW_HW=1     unlock hw-fsdb"
+	@echo "  IICE_STATIC_ID= IICE_STATIC_USERCODE= IICE_RM_ID="
+	@echo "                      RECORD these into the stamp of what is written"
+	@echo "  IICE_EXPECT_STATIC_ID= IICE_EXPECT_STATIC_USERCODE= IICE_EXPECT_RM_ID="
+	@echo "                      REFUSE unless the stamp records them"
+	@echo "  IICE_IDENTIFY_LOG=  instrumentation log to check the manifest against"
+	@echo "  IICE_REQUIRE_IDENTIFY_LOG=1  an absent/other-IICE log is a harness error"
+
+clean-compare:
+	rm -rf $(BUILD)/compare_logs $(BUILD)/negctl $(BUILD)/hw_iice.fsdb \
+	       $(BUILD)/hw_iice.fsdb.prov.json $(BUILD)/hw_iice_raw.fsdb.prov.json \
+	       $(BUILD)/hw_iice.json $(COMPARE_REPORT) \
+	       $(HERE)/nCompareLog $(HERE)/fsdb2vcdLog $(HERE)/vcd2fsdbLog \
+	       $(HERE)/fsdbqryLog $(HERE)/__pycache__ $(HERE)/ncompare/__pycache__ \
+	       $(HERE)/tests/__pycache__ $(HERE)/.pytest_cache

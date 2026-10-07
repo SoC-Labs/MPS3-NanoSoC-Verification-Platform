@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "static_id": "0x72BB0A36",
+  "rm_id": "0x010000B2",
+  "rm_name": "regdemo_b",
+  "ip_class": "open",
+  "clearing": {
+    "file": "regdemo_b_clear.bin",
+    "len": 61908,
+    "crc32": "0x805fef3b"
+  },
+  "partial": {
+    "file": "regdemo_b.bin",
+    "len": 1243148,
+    "crc32": "0x13074dec"
+  },
+  "built": "2026-09-23",
+  "vivado": "2024.1",
+  "static_usercode": "0xC8551081"
+}

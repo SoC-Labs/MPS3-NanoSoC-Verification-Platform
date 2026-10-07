@@ -1,0 +1,53 @@
+LAN8720 SUT -- DATAPATH (TX frame egress) through the real ethernet-subsystem DUT
+DUT   : ethmac_ahb_rmii (OpenCores ethmac MAC + DMA master + rmii_to_mii)
+RAM   : pure-SV AHB-lite slave (this TB) answering the DMA master
+shield: tests/shield_path/shield_path.sv (MPS3 J28/PMOD0 path, ref_clk routed through)
+VCS   : vcs script version : T-2022.06
+
+Command: <repo>/tests/lan8720_sut/./simv_dp -l run_dp.log
+Chronologic VCS simulator copyright 1991-2022
+Contains Synopsys proprietary information.
+Compiler version T-2022.06-SP2_Full64; Runtime version T-2022.06-SP2_Full64;  Jul 14 16:51 2026
+LAN8720_DP: MODER default = 0x0000a000 (expect 0x0000A000)
+LAN8720_DP: CRC-32 self-test ok (0xcbf43926)
+LAN8720_DP: EXP  PAD=1 CRC=1 LEN=60
+LAN8720_DP: EXP  MINFL=64 MAXFL=1518
+LAN8720_DP: PHASE TX -- armed BD0 (60 bytes), TXEN set; watching rmii_txd
+LAN8720_DP: TX wait done after 24 polls (int_o=0)
+LAN8720_DP: after TX -- BD0 word0=0x003c7800 (RD bit 0), rmii bytes captured=72
+LAN8720_DP: INT_SOURCE=0x00000001 (TXB[0]=1 TXE[1]=0)
+LAN8720_DP: tx_en rising edges = 1, first-frame length (to tx_en fall) = 72 bytes
+LAN8720_DP: RMII egress [0..79]: 55 55 55 55 55 55 55 d5 ff ff ff ff ff ff 02 00 00 00 00 01 88 b5 4d 50 53 33 2d 4c 41 4e 38 37 32 30 21 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 1e 3a bf ae 
+LAN8720_DP:   ok    RMII egress body matches all 60 frame bytes (SFD@7), FCS follows at +68
+LAN8720_DP:   ok    TX BD Ready cleared (MAC consumed it)
+LAN8720_DP:   ok    no past-buffer (0xAA) bytes on the wire -- DMA respected the length
+LAN8720_DP:   ok    TX frame length 72 B on the wire = max(LEN+FCS, MINFL) + 8 (pre/SFD)
+LAN8720_DP: -- TX phase done (errors so far=0) --
+
+LAN8720_DP: PHASE RX -- sourcing a frame inbound (RMII, through the shield)
+LAN8720_DP: RX BD armed: word0=0x0000e000 (E bit 1), buf=0x2000
+LAN8720_DP: after healthy RX: RX BD word0=0x00406000 (E=0, len=64) after 1 polls
+LAN8720_DP:   ok    RX BD filled (Empty cleared), HW length=64, status=0x6000
+LAN8720_DP:   ok    RX BD CRC-error bit clear (sourced FCS accepted)
+LAN8720_DP:   ok    RX DMA buffer header matches the sourced frame
+LAN8720_DP: after dead-inbound RX: RX BD word0=0x0000e000 (E=1)
+LAN8720_DP:   ok    dead inbound -> RX BD stayed EMPTY (board finding #4 reproduced)
+
+LAN8720_DP: PHASE RX-2 -- inject a frame with a corrupted FCS
+LAN8720_DP: after bad-FCS RX: RX BD word0=0x00406002 (E=0, CRCerr[1]=1)
+LAN8720_DP:   ok    bad-FCS frame received WITH CRC-error flag set (not accepted as good)
+
+LAN8720_DP: PHASE RX-3 -- two frames across a 2-entry RX BD ring (wrap)
+LAN8720_DP: ring: BD2 word0=0x00404000 (E=0) buf[0]=0xff, BD3 word0=0x00406080 (E=0) buf[0]=0x11
+LAN8720_DP:   ok    both RX BDs filled -- the RX BD ring advanced across two frames
+
+LAN8720_DP: ============================================================
+LAN8720_DP: TX + RX datapath through the REAL DUT (MAC + DMA + rmii_to_mii):
+LAN8720_DP:   errors=0  VERDICT=PASS
+LAN8720_DP: ============================================================
+$finish called from file "<repo>/tests/lan8720_sut/tb_lan8720_dp.sv", line 572.
+$finish at simulation time             89580000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 89580000 ps
+CPU Time:      0.380 seconds;       Data structure size:   0.1Mb
+Tue Jul 14 16:51:48 2026

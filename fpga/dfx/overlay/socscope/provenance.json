@@ -1,0 +1,32 @@
+{
+  "schema": "rm-socscope-provenance",
+  "schema_version": 1,
+  "rm_key": "rm_socscope",
+  "rm_name": "socscope",
+  "rm_id": "0x01000006",
+  "synthesised_at": "2026-09-23T13:04:30Z",
+  "vivado": "2024.1",
+  "part": "xcku115-flvb1760-1-c",
+  "socscope_home": "<SOCSCOPE_HOME>",
+  "socscope_rev": "2edd05a2b209",
+  "socscope_dirty": false,
+  "generics": {},
+  "sources_digest": "8f15604d682c25edc01897ded56507c313f406d557821c9854845349729967d1",
+  "sources": [
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_trace_top.sv", "sha256": "77bbae2756d135c7d380754e82369b0eb02c144b460864e0d5987ff69545aa5a"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_probe_ahb.sv", "sha256": "32709adcf9c673b8663b09cabbd70feaa956767aa17b44200048a185b268e9a1"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_record_former.sv", "sha256": "b3603444b3cb8dbb17387ca8cc7578c84632f2fe35366232fe79b0eee1cebf9f"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_ring.sv", "sha256": "8841ac2062496cd697d25108b3edbe13e442d65b07620c70a73bdccbab28046b"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_framer.sv", "sha256": "43c0f64c54f8534cbaa92670cd496d03ed8fcabe014deedb02f95e70b65027d5"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_egress_serial.sv", "sha256": "8b4f6dc9354300d31989489bc65cfd56a787b3dde2c9ef585b3936511f197a39"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_csr_ahb.sv", "sha256": "7c97f903ac0b30f2855ef35feb9464b9d5ecd7e998568ced4f3ac2991b673cbd"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_cdc_fifo.sv", "sha256": "3d1c2ec15b08c1a1411dc7368049af97b5504283c99173ba1463b6c601761089"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_cdc_count.sv", "sha256": "b17a83cda2f06b85c5876e34d0c41301a4f14690e4d4e4dd1fbe88b7b2e65d3c"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_timebase.sv", "sha256": "172e5f350d4111ca0077655a97314e60b40fa9328097be3bef4430a8c455e0fe"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_freeze.sv", "sha256": "33639092033132d901632b6e20251e29e0061dc8496375185c7e1265ac138aab"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_freeze_ctl.sv", "sha256": "fbd9de25f81d39beb82aec5713831ef437dfbd3627bd748a9fa1bcb0892a4fae"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_cfg.sv", "sha256": "a8d9899b45bc9c0a919d654e8376d6b84407e99ca459a2382b4aa7c97e66086b"},
+    {"path": "SOCSCOPE_HOME/hw/rtl/socscope_selftest.sv", "sha256": "e07505dccd78a576893f2cb473fd071cb2966f3e471cd7bd065c3c1736ecfea7"},
+    {"path": "RM/rm_socscope.sv", "sha256": "f6798bde2230846788f4910dac4a1805bf77f99ff6534c8d67251c962ac0de27"}
+  ]
+}

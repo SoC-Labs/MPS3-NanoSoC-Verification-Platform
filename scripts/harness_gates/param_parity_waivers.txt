@@ -1,0 +1,52 @@
+# Tier-0 bench/BD parameter-parity waivers (check_bench_param_parity.py --waivers).
+#
+# Each line: <module> <PARAM> # reason / owner / ticket
+#
+# A waiver keeps `make harness-regression` green on a KNOWN, tracked gap while it
+# is burned down. It is NOT a fix. Removing a line must make the gate go red until
+# a bench elaborates that module at the shipped value. Do NOT add a new waiver to
+# silence a NEW gap without an owner -- that is how bug #1 shipped.
+#
+# ---------------------------------------------------------------------------
+# CLOSED (2026-07-10): the CSR-decode-width gap (bug #1) is fully burned down.
+# All six shell CSR blocks now have a tests/csr_decode_width arm that elaborates
+# at C_S_AXI_ADDR_WIDTH=32 and drives base+offset:
+#   uart_bridge, dfx_ctl (pre-existing) + dut_clkrst, board_gpio, swd_bb, telem.
+# Each was mutation-verified (revert LOCAL_ADDR_W to C_S_AXI_ADDR_WIDTH -> the
+# base+offset read/write tests go red, reproducing "read 0 / write ignored").
+# THIS FILE NOW HAS ZERO ACTIVE WAIVERS -- the parity gate stands on its own.
+# Do NOT add a new waiver to silence a NEW gap without an owner; that is how
+# bug #1 shipped. Add `-pvalue+<module>.<PARAM>=<shipped>` coverage instead.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ACTIVE WAIVER (added 2026-09-09, GATES/Phase-1) — ONE entry.
+#
+# jtag_bb C_S_AXI_ADDR_WIDTH
+#   FOUND BY: folding this gate into `make check` / `make check-ci`. Until then
+#   nothing invoked it on change, so nobody saw that the A6 SWD->JTAG cutover
+#   swapped the LIVE debug block from swd_bb to jtag_bb and never registered the
+#   new one. The gate was checking swd_bb -- which shell_bd.tcl no longer
+#   instantiates -- and saying nothing about jtag_bb, which ships at
+#   C_S_AXI_ADDR_WIDTH=32 (shell_bd.tcl:581, JTAGBB @ 0x44A7_0000) and is the
+#   block the bare-metal 0x72BB0A36 shell (the rollback image) debugs the DUT through.
+#
+#   WHY A WAIVER AND NOT A RED GATE: jtag_bb.sv already carries the bug-#1 FIX by
+#   construction -- `localparam int LOCAL_ADDR_W = (C_S_AXI_ADDR_WIDTH < 16) ?
+#   C_S_AXI_ADDR_WIDTH : 16;` (jtag_bb.sv:224), byte-identical to swd_bb.sv:217,
+#   which IS mutation-verified at width 32. Its own source comment (jtag_bb.sv:211)
+#   names the escape. So the DECODE is believed sound; what is missing is the
+#   PROOF, and a waiver that says "unproven" is honest where a red gate would
+#   claim "broken".
+#
+#   THIS IS NOT A FIX. Do not let it age: the whole point of bug #1 is that a
+#   correct-looking decode read 0 on silicon.
+#
+#   TODO (owner: the tests/csr_decode_width owner, NOT this wave — that Makefile
+#   is outside this change's file scope): add a `BLOCK=jtag_bb` arm to
+#   tests/csr_decode_width/Makefile mirroring the swd_bb arm --
+#       RTL_DIR := $(IP)/jtag_bb ; VERILOG_SOURCES := $(RTL_DIR)/jtag_bb.sv
+#       TOPLEVEL := jtag_bb ; PVALUE := -pvalue+jtag_bb.C_S_AXI_ADDR_WIDTH=32
+#   (the PVALUE must be a LITERAL, not $(TOPLEVEL): this gate greps for it) --
+#   then DELETE the line below and watch this gate stay green.
+# ---------------------------------------------------------------------------
+jtag_bb C_S_AXI_ADDR_WIDTH   # 2026-09-09: ships at 32, no bench elaborates it there. Decode carries the swd_bb LOCAL_ADDR_W fix by construction but is UNPROVEN. Burn down with tests/csr_decode_width BLOCK=jtag_bb.

@@ -1,0 +1,110 @@
+# MkDocs configuration for the MPS3 nanoSoC Verification Platform docs site.
+#
+# ---------------------------------------------------------------------------
+# HOW TO PREVIEW / BUILD
+# ---------------------------------------------------------------------------
+#   cd docs/site
+#   python3 -m venv .venv && . .venv/bin/activate
+#   pip install -r requirements.txt      # mkdocs + mkdocs-material (pinned); the
+#                                        # theme bundles its own CSS/JS/fonts --
+#                                        # no external CDN at runtime
+#   mkdocs serve                         # live preview on http://127.0.0.1:8000
+#   mkdocs build --strict                # static site into docs/site/site/
+#
+# PUBLISHING: .github/workflows/docs.yml builds this with --strict and deploys to
+# GitHub Pages on push to master. One-time repo setup: Settings -> Pages ->
+# Source: "GitHub Actions".
+#
+# NOTE ON THE "Reference" SECTION
+#   The authoritative docs (contracts, architecture spec, CI notes) live in the
+#   repo's top-level docs/ tree, OUTSIDE this site's docs_dir, and are
+#   deliberately NOT copied here (single source of truth). The Reference/Guide
+#   pages LINK OUT to them as absolute GitHub blob URLs (repo_url below), so the
+#   links resolve both on the published Pages site and when browsing the repo.
+#   `mkdocs build --strict` is clean because external (https) links are not
+#   validated against docs_dir.
+# ---------------------------------------------------------------------------
+
+site_name: MPS3 nanoSoC Verification Platform
+site_description: >-
+  A networked, Python-driven verification and development platform for Arm
+  Cortex-M SoCs on the Arm MPS3 board -- explained for engineers new to FPGAs.
+site_author: SoC Labs
+docs_dir: docs
+site_url: https://soc-labs.github.io/MPS3-NanoSoC-Verification-Platform/
+repo_url: https://github.com/SoC-Labs/MPS3-NanoSoC-Verification-Platform
+repo_name: SoC-Labs/MPS3-NanoSoC-Verification-Platform
+# The docs live at docs/site/docs relative to the repo root.
+edit_uri: edit/master/docs/site/docs/
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Concepts:
+      - FPGA & the fabric in 5 minutes: concepts/fpga-in-5-minutes.md
+      - The shell & the reconfigurable partition: concepts/shell-and-partition.md
+      - Reconfigurable Modules & the DUT: concepts/reconfigurable-modules-and-dut.md
+      - Over-the-wire reconfiguration: concepts/over-the-wire-reconfiguration.md
+      - Debugging the DUT (SWD/JTAG): concepts/debugging-the-dut.md
+  - Guides:
+      - Getting started & building: guides/getting-started.md
+      - The board-free gate (make check): guides/board-free-gate.md
+      - Adding an RM: guides/adding-an-rm.md
+      - Deploying an RM over the wire: guides/deploying-an-rm.md
+  - Reference:
+      - Overview: reference/index.md
+      - Interface contracts: reference/contracts.md
+      - Architecture & status: reference/architecture.md
+      - CI & testing: reference/ci-and-testing.md
+  - Glossary: glossary.md

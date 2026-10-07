@@ -1,0 +1,5 @@
+; Key overrides applied to templates/nanosoc.txt. Every key MUST already exist
+; in the template -- assemble_sd.sh refuses a key it cannot find rather than
+; silently adding one the MCC would ignore.
+FPGA_SMB: FALSE
+FPGA_LAN: FALSE

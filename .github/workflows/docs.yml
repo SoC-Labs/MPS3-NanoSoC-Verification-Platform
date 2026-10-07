@@ -1,0 +1,70 @@
+name: docs site
+
+# Build + publish the MkDocs site (docs/site/) to GitHub Pages on push to master.
+# Board-free and self-contained: mkdocs-material bundles its own CSS/JS/fonts (no
+# runtime CDN), and out-links to repo docs are absolute GitHub blob URLs, so
+# `mkdocs build --strict` is clean. See docs/site/mkdocs.yml + docs/CI.md.
+#
+# PUBLISHING IS OFF UNTIL A REPO ADMIN TURNS IT ON. The build job always runs (it
+# is the `mkdocs build --strict` gate). The deploy job runs only when the repo
+# variable PAGES_ENABLED is 'true': this repo is PRIVATE and Pages is not enabled,
+# and until 2026-09-24 every master push ended in a red "Creating Pages deployment
+# failed ... 404" -- it had never once deployed. To publish:
+#   1. Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+#      (for a private repo this depends on the org's plan, and the site may be
+#      public -- decide that first);
+#   2. Settings -> Secrets and variables -> Actions -> Variables:
+#      PAGES_ENABLED = true.
+#
+# Reproduce locally:
+#   cd docs/site && pip install -r requirements.txt && mkdocs serve
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'docs/site/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Serialise Pages publishes; never cancel an in-flight deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (mkdocs --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install docs toolchain
+        run: pip install -r docs/site/requirements.txt
+      - name: Build (strict)
+        run: mkdocs build --strict
+        working-directory: docs/site
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site/site
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    if: vars.PAGES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

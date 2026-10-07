@@ -1,0 +1,155 @@
+A3 target firmware build — RESULT (rev 4: PRODUCT=1, 1 MiB LMB, -Werror)
+=========================================================================
+
+SUPERSEDED BY THE FIELDED IMAGE, 2026-09-22. This file records the rev-4 build
+of 2026-09-10 and is kept as the evidence of that build. It is NOT the firmware
+on the board: the fielded image was baked 2026-09-16 beside static 0x3F1A560F,
+and PRODUCT=1 has since grown a SIXTH flag, DUT_EGRESS=1, which rev 4 predates.
+docs/FIELDED_SHELL.md's `fielded_fw_flags` row is the authority for what is
+actually flashed; every flag set named below is the rev-4 set. Re-run the build
+and rewrite this file (as rev 4 rewrote rev 3) rather than appending to it -- a
+stale evidence file is worse than none, which is the rule this note obeys.
+
+Date:     2026-09-10 (host <build-host>)
+Tools:    Vitis/xsct 2024.1 (/apps/Xilinx/Vitis/2024.1), mb-gcc 12.x, python3
+Input:    a 1 MiB-LMB shell XSA -> build/vitis_fw (BSP workspace).
+Build:    make -C firmware/platform clean WS=$REPO/build/vitis_fw
+          make -C firmware/platform elf PRODUCT=1 WS=$REPO/build/vitis_fw
+Status:   ELF BUILDS CLEAN under -Werror, FITS with wide headroom, bakes the
+          REAL greybox clearing, and carries the FIELDED flag set.
+          Host harness green: 38 binaries, ALL PASS, zero warnings (-Werror).
+
+WHAT CHANGED IN REV 4 (and why this file was rewritten, not appended to)
+------------------------------------------------------------------------
+rev 3 described a 256 KiB-LMB build with 4 KiB staging buffers, a 47,808 B
+greybox blob and static_id 0xECCEDBF3. Every one of those numbers is now
+wrong: LMB_KB defaults to 1024, the clearing buffers are 256 KiB each (which
+is what keeps a swap off the shared QSPI part), the real greybox clearing is
+61,704 B, and the minted/fielded static_id at the time was 0xA8C1C535. An evidence file
+that is stale is worse than none, so it was replaced.
+
+  1. PRODUCT=1 exists. It expands to CLCD=1 CLCD_KVM=1 HWICAP_FIFO=1
+     WINDOWED=1 TOUCH=1 -- the set the FIELDED shell's firmware was built
+     with (docs/FIELDED_SHELL.md, static_id 0xA8C1C535). Fabric pair:
+     SHELL_TOUCH=1 on the bitstream build. Before it, that set existed only
+     as five literals in a mint script and `make elf` with the DEFAULTS built
+     an image that pings, reports the right static_id, passes every
+     acceptance gate, and CANNOT LOAD A SINGLE RM (LITE HWICAP writers vs a
+     FIFO shell).
+  2. The Makefile now has consistency gates -- there were none before, and
+     $(error) did not appear anywhere in it:
+       TOUCH=1 without CLCD=1     -> $(error)   (used to die at LINK)
+       CLCD_KVM=1 without CLCD=1  -> $(error)   (used to LINK and silently
+                                                 never service the KVM)
+       HWICAP_FIFO unset          -> $(warning) (LITE shells legitimately
+                                                 exist; an error would be wrong)
+     Skipped when the only goal is `clean`.
+  3. -Werror on both the target build and firmware/test/. One carve-out,
+     -Wno-error=cpp: a #warning is an author talking to a reader
+     (net_if_lwip.c reports a BSP built without LWIP_TCP_KEEPALIVE, which the
+     firmware build cannot correct). Three long-standing warnings were fixed
+     with it: clcd.c's nested "/*", diag.c's volatile-discarding memset, and
+     an unused variable in test_config_agent_keepalive.c.
+  4. Dead code out of the image: coordinator_main_loop() DELETED (noreturn,
+     compiled into every image, called by nothing -- main.c owns the real
+     superloop), and swd_server.c gated behind LEGACY_SWD=1 (the JTAG cutover
+     made jtag_server/6921 the live debug service; nothing on the target calls
+     swd_server_*). The swd_server SOURCE stays: its host test links it.
+  5. New `version` verb on 6900 (net-protocol.md v0.8) -- the running image
+     reports its own harness release, HARNESS_VER32, build sha/dirty, the LMB
+     size it was LINKED for, and its compile-time feature set.
+
+=== FIT VERDICT (PRODUCT=1) ===
+  build/vitis_fw/shell_fw/shell_fw.elf
+     text 177,948   data 1,840   bss 599,808   dec 779,596  (0xBE54C)
+     LMB region 1,048,368 B usable  ->  HEADROOM 268,772 B.
+  elf32-microblazeel, entry 0x0, vectors 0x0/0x8/0x10/0x20, .text from 0x50.
+  Knobs in effect: LMB_KB=1024 BLOB=real STAGING_BYTES=4096 PARTIAL_RAM=2048
+                   CLEARING_RAM_BYTES=262144 SWAP_CLEARING_ARENA_BYTES=262144
+                   ICAP_DIRECT=1 ACK_WINDOW=16384
+
+=== .bss BUDGET — the two clearing buffers ARE the budget ===
+  config_agent.o    264,354   incoming-CLEARING slot 262,144 + partial 2,048
+  swap_fsm.o        263,432   resident clearing arena 262,144 + vars
+  lwIP memp pools    38,299
+  lwIP heap          16,587   (mem_size)
+  net_if_lwip.o       6,730   (UDP tables 3x3)
+  clcd.o              1,360   |  xvc_server.o 1,054  |  rest < 700 each
+Deliberate, not slack: the two buffers must COEXIST (the incoming clearing
+sits in config_agent's slot while SWAP_STREAM_CLEARING replays the outgoing
+one from swap_fsm's arena), and sizing them to hold the largest real clearing
+is what keeps every swap QSPI-FREE. One physical 8 MiB part backs BOTH the
+DFX overlay store and the nanoSoC boot map; D16 (ARCHITECTURE_SPEC.md §15)
+says keep it idle. Gated by scripts/harness_gates/check_clearing_fits.py --
+when it fires, RAISE the buffer, do not waive.
+
+=== GREYBOX BLOB — REAL, baked in .rodata (default) ===
+  fpga/dfx/overlay/greybox/{manifest.json,greybox_clear.bin} ->
+    firmware/platform/generated/greybox_blob.c:
+      static_id = 0xA8C1C535  (the MINTED/FIELDED shell, docs/FIELDED_SHELL.md)
+      greybox clearing = 61,704 B, crc32 0x29437C92, len_words 15,426, rm_id 0
+  mps3_shell_static_id() therefore reports 0xA8C1C535 -> ping.shell_id and
+  config_agent's push static_id gate are correct against the fielded shell.
+
+=== HARNESS IDENTITY (the `version` verb's source) ===
+  generated/mps3_version.{c,h}: v1.0.0  ver32 0x01000001  sha 50f39365
+  dirty=1 (built from a working tree with uncommitted changes -- honest, and
+  visible on the wire as version.dirty). The SAME ver32 is stamped into the
+  static bitstream's USR_ACCESS by fpga/dfx/build_dfx.tcl, so firmware and
+  JTAG report one number; a disagreement means the .bit and the image inside
+  it are from different builds (the "updatemem never re-run" skew).
+
+=== SYMBOL EVIDENCE (mb-nm on the PRODUCT=1 ELF) ===
+PRESENT (the feature set is really linked, not just -D'd):
+  0000eec4 T clcd_init
+  0000f6c8 T clcd_kvm_init
+  0000f71c T clcd_kvm_request_owner
+  0000efe4 T clcd_poll
+  00006164 T coordinator_handle_version
+  0000abdc T jtag_server_init
+  0000fda0 T touch_bus_scan
+  0000fa18 T touch_init
+  0000fe4c T touch_poll
+ABSENT (dead code and test-only hooks really are out of the image):
+  absent   touch_test_counters
+  absent   swd_server_init
+  absent   swd_server_poll
+  absent   coordinator_main_loop
+
+BSP / lwIP config (unchanged)
+-----------------------------
+  standalone + lwip220 RAW_API, per create_platform.tcl: mem_size 16384,
+  pbuf_pool_size 16, memp_n_pbuf 16, memp_n_tcp_seg 48 (>= the hardwired
+  TCP_SND_QUEUELEN), tcp_snd_buf 4096, tcp_wnd 16384 (== the firmware's
+  ACK_WINDOW -- equal windows avoid the mid-window-reopen stall), dhcp off,
+  static 192.168.10.101, stdin/stdout axi_uartlite_0.
+  App: -Os -ffunction-sections -fdata-sections -Wl,--gc-sections, -Werror,
+  -Dsnprintf=sniprintf (integer printf, ~48 KiB text saved), -DMPS3_LMB_KB.
+  CPU: -mcpu=v11.0 -mlittle-endian -mno-xl-soft-div -mno-xl-soft-mul
+  -mxl-barrel-shift (matches the BSP multilib).
+
+  *** THE BSP WORKSPACE USED FOR THIS BUILD IS STALE. ***  create_platform.tcl
+  asks for `bsp config lwip_tcp_keepalive true`, but the lwipopts.h in
+  build/vitis_fw carries LWIP_TCP_KEEPALIVE 0 -- i.e. this workspace predates
+  that line and was never regenerated. net_if_lwip.c reports it with a
+  #warning on EVERY build (which is exactly why -Wno-error=cpp is carved out:
+  the message must survive, and the firmware build cannot fix it). Effect:
+  config_agent's dead-peer reap does not engage on a board flashed from this
+  workspace. FIX = re-run step 1 (xsct create_platform.tcl), not a firmware
+  edit. Not done here: regenerating the BSP is a ~4 min step that changes the
+  shared workspace other agents in this wave are building against.
+
+Deferred to bring-up (honest)
+-----------------------------
+  - QSPI clearing STAGE/CACHE + partial staging exercise real SST26 flash --
+    needs D15 (QSPI/MCC config-flash arbitration) resolved at bring-up. The
+    RAM buffers above make the default path QSPI-free, so this is not on the
+    critical path.
+  - DBGBR register offsets/GO (xvc_server) -- confirm via a live hw_server
+    getinfo/shift round-trip; platform_regs.h's DBGBR block is the fix point.
+  - Pure-poll v1 (INTC In0..3 wired but unused); eth_irq -> ISR only if
+    polling drops frames (then program LAN9220 IRQ_CFG IRQ_POL=1 first).
+  - HWICAP/OVLSTORE offsets in platform_regs.h vs the generated x*_l.h.
+  - MAC provisioning: weak mps3_platform_mac() = 02:00:00:4D:50:53 (A6).
+  - version.ver32 vs the bitstream's USR_ACCESS has not been cross-checked on
+    silicon in this wave (needs a board; the mechanism is in place both sides).

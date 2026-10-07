@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "rm_key": "rm_nanosoc_ila",
+  "rp_inst": "u_rp_dut",
+  "ltx": "config_rm_nanosoc_ila.ltx",
+  "ltx_crc32": "0x2b28f387",
+  "ltx_len": 16080,
+  "partial": "config_rm_nanosoc_ila_pblock_rp_dut_partial.bin",
+  "partial_crc32": "0x10a91f36",
+  "ila_uuids": [
+    "BE040903B1CD546E89F3D16597D42742"
+  ],
+  "cores": [
+    {
+      "name": "u_rp_dut/u_dbg_hub/u_bridge/inst/xsdbm",
+      "type": "XSDB_V3"
+    },
+    {
+      "name": "u_rp_dut/u_ila_nanosoc",
+      "type": "ILA_V3"
+    }
+  ]
+}

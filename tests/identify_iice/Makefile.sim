@@ -1,0 +1,269 @@
+# =============================================================================
+# tests/identify_iice/Makefile.sim -- the SIM side of the IICE trace harness.
+#
+# OWNED BY STREAM B (INTERFACES.md §5). `-include`d by tests/identify_iice/
+# Makefile, which owns `clean` -- so the clean target here is `clean-sim`.
+# It uses the parent's exported HERE / BUILD / PYTHON / MANIFEST.
+#
+# Targets:
+#   sim-selftest   plain run, no FSDB, gated on VERDICT=PASS
+#   sim-fsdb       run WITH the generated shadow IICE -> $(BUILD)/sim_iice.fsdb
+#   clean-sim      remove this stream's leftovers
+#
+# =============================================================================
+# VCS + FSDB: WHAT WAS ACTUALLY MEASURED ON THIS MACHINE (2026-07-29)
+# =============================================================================
+# The repo had ZERO FSDB usage before this file -- every novas.*/verdi* string
+# in tests/*/Makefile is a `make clean` pattern, and the existing benches dump
+# VPD. None of the below could be copied from house style; it was measured, and
+# the first recipe that looked right turned out to be a trap.
+#
+# THE RECIPE THAT WORKS EVERYWHERE
+# --------------------------------
+#       -debug_access[+all]      on the vcs command line
+#     + VERDI_HOME set           at COMPILE time *and* at RUN time
+#     + NOVAS_HOME UNSET
+#     and NO -P / novas.tab / pli.a at all.
+#
+# VCS notices -debug_access and appends $VERDI_HOME/share/PLI/VCS/LINUX64/pli.a
+# to its own link line. Proven end-to-end, twice:
+#       vcs/T-2022.06-SP2       + verdi/T-2022.06-SP2   -> readable FSDB
+#       vcs/W-2024.09-SP2-3-PC  + verdi/X-2025.06-SP2   -> readable FSDB
+#
+# `-debug_access+all` is the default here for safety, but plain `-debug_access`
+# and `-debug_access+r` were BOTH measured to produce a byte-for-byte equivalent
+# 8-signal FSDB (9429 vs 9492 bytes). `+all` disables optimisations across the
+# whole design; that is free on this 300-clock selftest but NOT free on the real
+# nanosoc bench (INTERFACES.md §2: signals_nanosoc.yaml, "the reference bench is
+# slow"). Hence the override below. The shadow IICE reads its probes through
+# absolute hierarchical references, which are a language-level dependency and so
+# keep those nets alive without any debug-access privilege.
+#
+# THE TRAP THAT COST THE MOST: -P novas.tab pli.a IS DEPRECATED, AND SILENTLY
+# ---------------------------------------------------------------------------
+# The classic recipe -- `-P $VERDI_HOME/share/PLI/VCS/LINUX64/novas.tab
+# .../pli.a`, no -debug_access -- DOES work against the Verdi 2022.06 PLI. It is
+# REFUSED by the Verdi X-2025.06 PLI:
+#
+#     *Verdi* ERROR: 'Enable FSDB dumping with option -debug/-debug_pp/
+#             -debug_all and option -P along with novas.tab file' is deprecated
+#             starting from VERDI2024.09.
+#     *Verdi* ERROR: Please use '-debug_access' along with a proper setting on
+#             VERDI_HOME environment variable in vcs compilation.
+#
+# and -- this is the point -- it is refused AT RUN TIME, AFTER a clean compile.
+# The simulation runs to completion, exits 0, prints VERDICT=PASS, and writes NO
+# FSDB. So `-P` is not merely deprecated, it is a recipe that passes a
+# VERDICT-only gate while producing nothing.
+#
+# THE SAME SILENT FAILURE, SECOND CAUSE: VERDI_HOME MISSING AT *RUN* TIME
+# ----------------------------------------------------------------------
+# The PLI links at compile time but resolves a version-keyed shared object at
+# RUN time: libsscore_vcs<YYYYMM>.so, found via VERDI_HOME (or LD_LIBRARY_PATH).
+# With VERDI_HOME unset at run time:
+#
+#     *Verdi* Loading libsscore_vcs202206.so
+#     *Verdi* Cannot load libsscore_vcs202206.so from following LD_LIBRARY_PATH
+#     *Verdi* Failed to load FSDB dumper.
+#
+# Again: exit 0, VERDICT=PASS, no FSDB. Note the base login environment on this
+# machine has a STALE NOVAS_HOME=/opt/synopsys/verdi/Verdi_N-2017.12 which does
+# not exist, so both variables are set deliberately below.
+#
+# Both silent modes are why this target deletes the stale FSDB before running,
+# greps the run log for '*Verdi* ERROR' as well as the dumper-load failures, and
+# asserts the FSDB exists and is non-empty. A compare against a missing or stale
+# trace is exactly the "harness error reported as a match" INTERFACES.md §4
+# forbids.
+#
+# THE VCS/VERDI PAIRING IS NOT FREE CHOICE
+# ----------------------------------------
+# libsscore_vcs<YYYYMM>.so is keyed to the VCS release and the two Verdi
+# installs ship DISJOINT sets:
+#
+#   Verdi T-2022.06-SP2   /eda/synopsys/2022-23/RHELx86/VERDI_2022.06-SP2
+#       libsscore_vcs202012.so  202109.so  202206.so
+#   Verdi X-2025.06-SP2   /apps/synopsys/vc_formal/X-2025.06-SP2/verdi
+#       libsscore_vcs202312.so  202409.so  202506.so
+#
+# So the only valid pairings are:
+#       vcs/T-2022.06-SP2        <-> verdi/T-2022.06-SP2
+#       vcs/W-2024.09-SP2-3-PC   <-> verdi/X-2025.06-SP2
+#
+# VERDI_PLI_ROOT discovery below therefore does not take VERDI_HOME on faith: it
+# picks the first candidate that actually contains the libsscore matching the
+# VCS that $VCS_HOME resolves to. That also auto-recovers the common half-loaded
+# case (`module load vcs/W-2024.09` with no verdi module, so Verdi 2022.06 is
+# still on PATH from the login profile).
+#
+# `vcs -ID` prints TWO versions and only "Compiler version" is authoritative --
+# "vcs script version" reports the script you invoked, while the compiler comes
+# from $VCS_HOME. Running the W-2024.09 `vcs` script with VCS_HOME still at the
+# 2022.06 tree really does run the 2022.06 compiler.
+#
+# READING THE RESULT BACK
+# -----------------------
+# Proven: `fsdb2vcd <f> -o out.vcd` -- full hierarchy and values, X preserved.
+# BROKEN HERE, and Stream C needs to know: `fsdbqry` fails on EVERY FSDB tried,
+# under BOTH Verdi vintages, with
+#     *WARN* Only support streamlined header file in fsdbqry.
+#     *WARN* fsdbqry failed.
+# including on an FSDB written by Verdi's own vcd2fsdb. INTERFACES.md §4
+# mandates fsdbqry for the set-equality precheck; on this install it cannot do
+# that job, and fsdb2vcd (the plan's own V1 fallback) must be used instead.
+# Also note fsdbqry / fsdbdir / fsdb2vcd each litter the CWD with <tool>Log/,
+# the same way §6 warns nCompare litters nCompareLog/.
+# =============================================================================
+
+# The parent exports these; the fallbacks let `make -f Makefile.sim` work too.
+HERE   ?= $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+BUILD  ?= $(HERE)/build
+PYTHON ?= python3
+
+SIM ?= vcs
+VCS ?= vcs
+
+# House style, matched to tests/rmii_speed and tests/gpio_shield.
+VCS_ARGS := -full64 -sverilog -timescale=1ns/1ps -notice -licqueue -top tb
+
+# The FSDB enable flag. Override for the slow nanosoc bench, where +all is not
+# free: `make sim-fsdb VCS_FSDB_DEBUG=-debug_access` was measured to give an
+# identical 8-signal trace.
+VCS_FSDB_DEBUG ?= -debug_access+all
+
+SIM_SRCS  := $(HERE)/selftest_dut.sv $(HERE)/tb_selftest.sv
+SHADOW_SV := $(BUILD)/iice_shadow_IICE_SELFTEST.sv
+SIM_FSDB  := $(BUILD)/sim_iice.fsdb
+
+.PHONY: sim-selftest sim-fsdb clean-sim
+
+# --- guard: this bench is pure-SV VCS, like every other bench in tests/ ------
+# Checked in the recipes, not at parse time: this file is -include'd, so a
+# parse-time $(error) would also break `make gen` and `make clean`.
+define SIM_GUARD
+	if [ "$(SIM)" != "vcs" ]; then \
+	  echo "ERROR: tests/identify_iice is a pure-SV VCS bench. Got SIM=$(SIM); use SIM=vcs."; \
+	  exit 1; \
+	fi; \
+	command -v $(VCS) >/dev/null 2>&1 || { \
+	  echo "ERROR: '$(VCS)' not on PATH. source <repo-root>/set_env.sh, or"; \
+	  echo "       module load vcs/W-2024.09-SP2-3-PC verdi/X-2025.06-SP2"; \
+	  exit 1; }
+endef
+
+# --- discover a Verdi whose PLI matches THIS VCS (see header) ----------------
+# Emits shell that sets $verdi_root, or fails with the pairing matrix.
+define FIND_VERDI_ROOT
+	tag=$$($(VCS) -ID 2>/dev/null \
+	       | sed -n 's/^Compiler version *= *VCS *[A-Z]-\([0-9]\{4\}\)\.\([0-9]\{2\}\).*/\1\2/p' \
+	       | head -1); \
+	if [ -z "$$tag" ]; then \
+	  echo "ERROR: could not read the compiler release from '$(VCS) -ID'."; exit 1; fi; \
+	verdi_root=""; \
+	for cand in "$$VERDI_HOME" "$$NOVAS_HOME" \
+	            "$$(command -v verdi 2>/dev/null | sed -n 's:/bin/verdi$$::p')" \
+	            /apps/synopsys/vc_formal/X-2025.06-SP2/verdi \
+	            /eda/synopsys/2022-23/RHELx86/VERDI_2022.06-SP2 ; do \
+	  [ -n "$$cand" ] || continue; \
+	  if [ -f "$$cand/share/PLI/VCS/LINUX64/libsscore_vcs$$tag.so" ] \
+	  && [ -f "$$cand/share/PLI/VCS/LINUX64/pli.a" ]; then verdi_root="$$cand"; break; fi; \
+	done; \
+	if [ -z "$$verdi_root" ]; then \
+	  echo "ERROR: no Verdi install found with libsscore_vcs$$tag.so (needed by this VCS)."; \
+	  echo "       The pairing is NOT free choice -- the libsscore sets are disjoint:"; \
+	  echo "         vcs/T-2022.06-SP2      <-> verdi/T-2022.06-SP2"; \
+	  echo "         vcs/W-2024.09-SP2-3-PC <-> verdi/X-2025.06-SP2"; \
+	  echo "       Fix: module load vcs/W-2024.09-SP2-3-PC verdi/X-2025.06-SP2"; \
+	  exit 1; \
+	fi; \
+	echo "== VCS release tag : $$tag"; \
+	echo "== VERDI_HOME      : $$verdi_root"
+endef
+
+# =============================================================================
+# sim-selftest -- the plain run. No FSDB, no shadow module, so it compiles and
+# passes with Stream A's generated file ABSENT. That keeps this stream honest
+# (the DUT and TB are proven on their own) and keeps FSDB cost out of any
+# default gate (plan §6 risk V5).
+# =============================================================================
+sim-selftest:
+	@$(SIM_GUARD)
+	@mkdir -p $(BUILD)
+	@echo "== [sim-selftest] build (no shadow, no FSDB) =="
+	@cd $(BUILD) && $(VCS) $(VCS_ARGS) $(SIM_SRCS) \
+	    -Mdir=$(BUILD)/csrc_plain -o $(BUILD)/simv_plain -l $(BUILD)/comp_plain.log
+	@echo "== [sim-selftest] run  EXPECT VERDICT=PASS =="
+	@cd $(BUILD) && $(BUILD)/simv_plain -l $(BUILD)/run_plain.log >/dev/null
+	@grep -E '^IICE_SIM:' $(BUILD)/run_plain.log || true
+	@grep -q 'VERDICT=PASS' $(BUILD)/run_plain.log || { \
+	  echo "FAIL: the selftest DUT did not reach VERDICT=PASS -- the trace source"; \
+	  echo "      itself is broken, so nothing downstream can be trusted."; exit 1; }
+	@echo "SIM_SELFTEST_OK"
+
+# =============================================================================
+# sim-fsdb -- the trace producer.
+#
+# Compiles WITH +define+IICE_SHADOW and Stream A's generated portless shadow
+# module, and runs with +iice_shadow (accepted/reported by the TB) and
+# +iice_fsdb=<path> (consumed inside the generated module, per §3.2).
+#
+# The shadow is `ifdef`-guarded rather than plusarg-guarded because Verilog
+# cannot conditionally instantiate a module on a runtime plusarg -- see the
+# comment block in tb_selftest.sv.
+#
+# VERDI_HOME is set on BOTH the compile and the run, and NOVAS_HOME is unset on
+# both: Verdi warns "The path specified with NOVAS_HOME conflicts with the path
+# specified with VERDI_HOME ... unset NOVAS_HOME", and the ambient NOVAS_HOME
+# here points at a Verdi that no longer exists.
+# =============================================================================
+sim-fsdb:
+	@$(SIM_GUARD)
+	@mkdir -p $(BUILD)
+	@test -f $(SHADOW_SV) || { \
+	  echo "ERROR: $(SHADOW_SV) is missing."; \
+	  echo "       It is GENERATED from the manifest by gen_shadow.py -- run 'make gen' first."; \
+	  exit 1; }
+	@$(FIND_VERDI_ROOT); \
+	 echo "== [sim-fsdb] build (+define+IICE_SHADOW $(VCS_FSDB_DEBUG)) =="; \
+	 cd $(BUILD) && env -u NOVAS_HOME VERDI_HOME="$$verdi_root" \
+	   $(VCS) $(VCS_ARGS) $(VCS_FSDB_DEBUG) +define+IICE_SHADOW \
+	     $(HERE)/selftest_dut.sv $(SHADOW_SV) $(HERE)/tb_selftest.sv \
+	     -Mdir=$(BUILD)/csrc_fsdb -o $(BUILD)/simv_fsdb -l $(BUILD)/comp_fsdb.log; \
+	 echo "== [sim-fsdb] run -> $(SIM_FSDB) =="; \
+	 rm -f $(SIM_FSDB); \
+	 cd $(BUILD) && env -u NOVAS_HOME VERDI_HOME="$$verdi_root" \
+	   $(BUILD)/simv_fsdb +iice_shadow +iice_fsdb=$(SIM_FSDB) \
+	     -l $(BUILD)/run_fsdb.log >/dev/null
+	@grep -E '^IICE_SIM:' $(BUILD)/run_fsdb.log || true
+	@# --- the silent-failure guard: no dumper => no FSDB, but still exit 0 ---
+	@if grep -qE '\*Verdi\* ERROR|Failed to load FSDB dumper|Cannot load libsscore' \
+	     $(BUILD)/run_fsdb.log; then \
+	  echo "FAIL: the Novas FSDB dumper refused or failed to load at RUN time, so no"; \
+	  echo "      trace was written even though the simulation exited 0. See the"; \
+	  echo "      header of Makefile.sim (deprecated -P, or VERDI_HOME/libsscore)."; \
+	  grep -E '\*Verdi\*' $(BUILD)/run_fsdb.log | head -6; exit 1; fi
+	@grep -q 'VERDICT=PASS' $(BUILD)/run_fsdb.log || { \
+	  echo "FAIL: the +iice_shadow run did not reach VERDICT=PASS."; exit 1; }
+	@# --- the FSDB must exist and be non-empty, or this target FAILS ---------
+	@test -f $(SIM_FSDB) || { \
+	  echo "FAIL: $(SIM_FSDB) was not created. A missing trace must never pass as a"; \
+	  echo "      green sim (INTERFACES.md §4: a harness error is never a match)."; \
+	  exit 1; }
+	@test -s $(SIM_FSDB) || { \
+	  echo "FAIL: $(SIM_FSDB) is zero bytes."; exit 1; }
+	@echo "== FSDB OK: $(SIM_FSDB) ($$(stat -c%s $(SIM_FSDB)) bytes)"
+	@echo "SIM_FSDB_OK"
+
+# NOTE: no `$(BUILD):` rule here. The parent Makefile already defines one, and a
+# second recipe for the same target makes GNU make print
+#   warning: overriding recipe for target '.../build'
+#   warning: ignoring old recipe for target '.../build'
+# on EVERY invocation, including `make clean`. The recipes above just mkdir -p.
+
+clean-sim:
+	rm -rf $(BUILD)/simv_plain $(BUILD)/simv_plain.daidir $(BUILD)/csrc_plain \
+	       $(BUILD)/simv_fsdb $(BUILD)/simv_fsdb.daidir $(BUILD)/csrc_fsdb \
+	       $(BUILD)/comp_plain.log $(BUILD)/run_plain.log \
+	       $(BUILD)/comp_fsdb.log $(BUILD)/run_fsdb.log \
+	       $(BUILD)/novas_dump.log $(BUILD)/ucli.key $(BUILD)/vc_hdrs.h \
+	       $(BUILD)/fsdbqryLog $(BUILD)/fsdb2vcdLog $(SIM_FSDB)

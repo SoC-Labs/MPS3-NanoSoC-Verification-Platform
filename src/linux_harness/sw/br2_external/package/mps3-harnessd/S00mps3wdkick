@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# S00mps3wdkick — the FIRST rcS script: start mps3-wdkick, the bounded watchdog
+# bridge, in the background (HARNESSD_CONTRACT.md §5.3, IMAGE_CONTRACT.md §8).
+#
+# stage0 arms the watchdog (~42.9 s) before it jumps to Linux; its owner,
+# mps3-harnessd, starts from inittab only after ALL of rcS -- and S12mps3persist
+# on a user microSD alone took ~9 s on B2 (2026-09-26). mps3-wdkick kicks the
+# watchdog (only if stage0 armed it) until harnessd runs, and never longer than
+# --max-s (150) seconds since boot, so a boot that never reaches harnessd is
+# still reset. It never confirms the boot to stage0: harnessd alone does that.
+#
+# WHY AN rcS SCRIPT (not an inittab ::sysinit: line): BusyBox init WAITS for every
+# sysinit action, so a sysinit kicker would have to daemonise itself, and a line
+# placed before rcS in /etc/inittab fights the managed inittab.d block that
+# mps3_image.py merges (IMAGE_CONTRACT §7.1). rcS runs S00 first, ~0.5 s after
+# /init (proc/sys/dev are mounted by then), and `&` never delays rcS.
+#
+# QEMU (no fabric, no watchdog UIO): mps3.wdkick_mem=<file> on the cmdline maps
+# <file> as the watchdog page (TWCSR0 = EWDT1 seeded here), so the proof can see
+# the bridge start and stop without hardware. Never set on a board.
+
+case "$1" in
+    start) ;;
+    *) exit 0 ;;
+esac
+[ -x /usr/sbin/mps3-wdkick ] || exit 0
+
+args=""
+for a in $(cat /proc/cmdline 2>/dev/null); do
+    case "$a" in
+        mps3.wdkick_mem=*)
+            mem=${a#*=}
+            # TWCSR0 = EWDT1 (0x02), TWCSR1 = a sentinel the kicker must never touch
+            printf '\002\000\000\000\245\245\245\245' > "$mem" && \
+                dd if=/dev/zero bs=1 count=4088 2>/dev/null >> "$mem" && args="--mem $mem" ;;
+        mps3.wdkick_max=*) args="$args --max-s ${a#*=}" ;;
+    esac
+done
+# shellcheck disable=SC2086
+/usr/sbin/mps3-wdkick $args < /dev/null > /dev/console 2>&1 &
+exit 0

@@ -1,0 +1,81 @@
+tests/realphy_timing -- the SHELL_REALPHY variant: its mint knob and its I/O budget
+==================================================================================
+WHAT   : board-free gates on the real-LAN8720 shell variant. NOT a simulation.
+         Two things are gated: (1) that SHELL_REALPHY is safe to hand to
+         `make -C fpga/dfx mint` because the DEFAULT build provably cannot
+         notice it exists, and (2) that the RMII I/O timing NUMBERS fed to
+         Vivado describe the board rather than a wish.
+RUNS IN: `make check-ci` stage 3 (`pytest tests -q`). Pure Python; no simulator,
+         no Vivado, no board. tclsh and verilator are used where available and
+         those gates skip cleanly without them.
+DECISION DOC: docs/planning/REALPHY_RATE_DECISION.md
+
+COMMAND
+  python3 -m pytest tests/realphy_timing -q
+
+RESULT (2026-09-11): 47 passed
+
+WHY IT EXISTS
+  A `set_input_delay` is believed by the tool unconditionally. An under-counted
+  board flight time produces a clean "all user specified timing constraints are
+  met" report for a design that cannot work -- the most expensive kind of green.
+  And a variant flag that the default build CAN notice is a flag that will one
+  day be noticed in a mint.
+
+THE TWO DEFECTS THESE GATES WERE WRITTEN AGAINST (both fixed in the same wave)
+
+  D1  THE GATE GUESSED. The expression was
+        [info exists ::env(SHELL_REALPHY)] && $v ne "0" && $v ne ""
+      so SHELL_REALPHY=no / false / off all read as TRUE and built the
+      NON-DEFAULT variant. test_gate_refuses_to_guess_at_anything_else runs the
+      REAL Tcl proc out of build_shell.tcl under tclsh over that whole table;
+      test_control_the_old_permissive_gate_would_fail_this_suite runs the
+      SUPERSEDED expression and watches it accept "no", so the suite is shown
+      to be testing what it claims to.
+
+  D2  THE ROUND TRIP WAS CHARGED ONCE. Clocking Option A has the FPGA source
+      REF_CLK and drive it out, so the board flight time is paid on BOTH legs --
+      out with the clock, back with the data. The first-pass constraint file
+      charged a single brd_trace_max. That is 2 ns of margin that never existed
+      on a path that has 1.5 ns of real margin.
+
+THE NUMBERS, AS THE COMMITTED XDC DECLARES THEM
+  period                      20.00 ns   50 MHz -- AT BOTH LINK RATES
+  - brd_clk_out_max            2.00      engineering estimate
+  - lan_tco_max               14.00      UNVERIFIED datasheet-class  <-- 70%
+  - brd_data_in_max            2.00      engineering estimate
+  - brd_skew                   0.50      engineering estimate
+  = left for FPGA capture      1.50 ns   (declared reserve: 1.00 ns)
+  => 92.5% of the period is spent before the data reaches the FPGA.
+
+  The cheapest action on this whole work item is free and at a desk: read
+  lan_tco_max off the LAN8720A datasheet. Nobody in this repo has.
+
+THE RATE IS NOT A TIMING LEVER
+  RMII clocks REF_CLK at 50 MHz at BOTH 10 and 100 Mb/s; the line rate is
+  carried by di-bit repetition, not by clock frequency. So no I/O delay here
+  depends on REALPHY_RATE, and a gate refuses to let one start to. Dropping to
+  10 Mb/s buys inbound ANALOG margin (25 MHz -> 2.5 MHz fundamental) and exactly
+  zero setup margin. A multicycle waiver IS arithmetically available at 10 Mb/s
+  and is deliberately NOT taken; a gate fails if a live set_multicycle_path
+  appears without the tick-alignment argument being written first.
+
+MUTATION CHECK -- every gate seen to fail, against the real working-tree files
+  M1  drop `IOB TRUE` from ETH_RMII_CRS_DV's pin constraint ....... 1 failed
+  M2  delete the IOB=TRUE RX capture flop from shell_top.sv ....... 1 failed
+  M3  zero brd_clk_out_max (the one-trace model, i.e. D2) ......... 4 failed
+  M4  hoist a gated realphy add_files out of `if {$shell_realphy}`  1 failed
+  M5  default REALPHY_RATE to 10 while the RM stays 100 Mb/s ...... 1 failed
+  M6  raise lan_tco_max 14.0 -> 17.0 (a worse real datasheet) ..... 1 failed
+  baseline restored ............................................... 47 passed
+
+WHAT IS DEMONSTRATED ELSEWHERE, NOT HERE (needs Vivado; see RESULT.md)
+  * SHELL_REALPHY unset and SHELL_REALPHY=0 produce a BYTE-IDENTICAL validated
+    shell_bd.bd (same md5) -- the byte-identity claim, measured.
+  * The variant adds EXACTLY the nine phy_pad_* wrapper ports and no other BD
+    boundary change.
+  * OOC synth of shell_top: the nine real-PHY pad flops all carry IOB=TRUE,
+    including the three new RX capture flops.
+  * IOB PACKING ITSELF IS INFERRED, NOT DEMONSTRATED. IOB=TRUE is an intent
+    that place_design honours or rejects, and placing is implementation, which
+    this lane does not run. The mint must check it.

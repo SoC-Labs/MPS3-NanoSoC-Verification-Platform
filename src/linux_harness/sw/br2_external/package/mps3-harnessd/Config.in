@@ -1,0 +1,20 @@
+config BR2_PACKAGE_MPS3_HARNESSD
+	bool "mps3-harnessd"
+	help
+	  The MPS3 shell's firmware service modules (coordinator, swap FSM,
+	  config agent, JTAG/XVC/UART servers, CLCD/KVM/touch, clkrst,
+	  identify) compiled UNMODIFIED for Linux as one process, against
+	  the UIO register HAL, kernel sockets and a poll()-driven service
+	  table (src/linux_harness/sw/harnessd/,
+	  docs/planning/linux_lanes/HARNESSD_CONTRACT.md). Speaks the
+	  bare-metal wire (net-protocol v0.11) plus the additive
+	  version.impl = "linux".
+
+	  Installs /usr/sbin/mps3-harnessd and the inittab drop-in
+	  /usr/share/mps3/inittab.d/50-mps3-harnessd.inittab
+	  (::respawn:/usr/sbin/mps3-harnessd), which IMAGE's provisioning
+	  merges into /etc/inittab (IMAGE_CONTRACT.md §7.1).
+
+	  Replaces the v0.7 hand-ported daemons, which stay buildable as
+	  BR2_PACKAGE_MPS3_LEGACY_DAEMONS (the two are mutually exclusive:
+	  they bind the same ports).

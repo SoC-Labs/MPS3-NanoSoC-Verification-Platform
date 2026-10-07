@@ -1,0 +1,143 @@
+
+Discarded input sections
+
+ .text          0x00000000        0x0 crt0.o
+ .data          0x00000000        0x0 crt0.o
+ .bss           0x00000000        0x0 crt0.o
+ .text          0x00000000        0x0 memtest.o
+ .data          0x00000000        0x0 memtest.o
+ .bss           0x00000000        0x0 memtest.o
+ .comment       0x00000000       0x13 memtest.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+LMB              0x00000000         0x00020000         xrw
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+LOAD crt0.o
+LOAD memtest.o
+                0x00000000                        . = ORIGIN (LMB)
+
+.text           0x00000000     0x11a8
+ *(.init)
+ .init          0x00000000       0x70 crt0.o
+                0x00000000                _start
+                0x00000054                trap_entry
+ *(.vectors)
+ *(.text.startup .text.startup.*)
+ .text.startup.main
+                0x00000070      0x93c memtest.o
+                0x00000070                main
+ *(.text .text.*)
+ .text.uart_puts
+                0x000009ac       0x5c memtest.o
+ .text.uart_puthex
+                0x00000a08       0x4c memtest.o
+ .text.dcache_flush
+                0x00000a54       0x30 memtest.o
+ .text.uart_putdec
+                0x00000a84       0x90 memtest.o
+ .text.report   0x00000b14      0x158 memtest.o
+ .text.trap_report
+                0x00000c6c       0xa0 memtest.o
+                0x00000c6c                trap_report
+                0x00000d0c                        . = ALIGN (0x4)
+ *(.rodata .rodata.* .srodata .srodata.*)
+ .rodata.report.str1.4
+                0x00000d0c      0x487 memtest.o
+                                 0x20 (size before relaxing)
+ .rodata.trap_report.str1.4
+                0x00001193       0xa9 memtest.o
+ .rodata.main.str1.4
+                0x00001193      0x3bf memtest.o
+ *fill*         0x00001193        0x1 
+ .rodata.hd.0   0x00001194       0x11 memtest.o
+                0x000011a8                        . = ALIGN (0x4)
+ *fill*         0x000011a5        0x3 
+
+.rela.dyn       0x000011a8        0x0
+ .rela.init     0x000011a8        0x0 crt0.o
+
+.data           0x000011a8        0x0
+                0x000011a8                        __data_start = .
+ *(.data .data.*)
+                0x000011a8                        . = ALIGN (0x8)
+                0x000019a8                        PROVIDE (__global_pointer$ = (. + 0x800))
+ *(.sdata .sdata.* .sdata2 .sdata2.*)
+                0x000011a8                        . = ALIGN (0x4)
+                0x000011a8                        __data_end = .
+
+.bss            0x000011a8        0x4
+                0x000011a8                        __bss_start = .
+ *(.sbss .sbss.* .scommon)
+ .sbss.g_flush_sink
+                0x000011a8        0x4 memtest.o
+ *(.bss .bss.*)
+ *(COMMON)
+                0x000011ac                        . = ALIGN (0x4)
+                0x000011ac                        __bss_end = .
+                0x000011ac                        . = ALIGN (0x4)
+                0x000011ac                        _end = .
+                [!provide]                        PROVIDE (end = .)
+                0x00020000                        _estack = (ORIGIN (LMB) + LENGTH (LMB))
+
+/DISCARD/
+ *(.comment)
+ *(.note .note.*)
+ *(.eh_frame .eh_frame_hdr)
+                0x00000001                        ASSERT ((_end <= ((ORIGIN (LMB) + LENGTH (LMB)) - 0x400)), ERROR: memtest image leaves < 1 KiB of stack in the 64 KiB LMB)
+OUTPUT(memtest.elf elf32-littleriscv)
+
+.riscv.attributes
+                0x00000000       0x37
+ .riscv.attributes
+                0x00000000       0x35 crt0.o
+ .riscv.attributes
+                0x00000035       0x2e memtest.o
+
+.debug_line     0x00000000     0x205d
+ .debug_line    0x00000000       0xbe crt0.o
+ .debug_line    0x000000be     0x1f9f memtest.o
+
+.debug_line_str
+                0x00000000       0xe9
+ .debug_line_str
+                0x00000000       0xe9 crt0.o
+                                 0x4d (size before relaxing)
+ .debug_line_str
+                0x000000e9      0x13c memtest.o
+
+.debug_info     0x00000000     0x19b4
+ .debug_info    0x00000000       0x3c crt0.o
+ .debug_info    0x0000003c     0x1978 memtest.o
+
+.debug_abbrev   0x00000000      0x374
+ .debug_abbrev  0x00000000       0x28 crt0.o
+ .debug_abbrev  0x00000028      0x34c memtest.o
+
+.debug_aranges  0x00000000       0x70
+ .debug_aranges
+                0x00000000       0x20 crt0.o
+ .debug_aranges
+                0x00000020       0x50 memtest.o
+
+.debug_str      0x00000000      0x29a
+ .debug_str     0x00000000      0x29a crt0.o
+                                 0x6d (size before relaxing)
+ .debug_str     0x0000029a      0x26d memtest.o
+
+.debug_loclists
+                0x00000000      0xb38
+ .debug_loclists
+                0x00000000      0xb38 memtest.o
+
+.debug_rnglists
+                0x00000000      0x415
+ .debug_rnglists
+                0x00000000      0x415 memtest.o
+
+.debug_frame    0x00000000       0xf8
+ .debug_frame   0x00000000       0xf8 memtest.o

@@ -1,0 +1,44 @@
+# Simulator build/run artifacts (VCS/Questa via cocotb Makefile.sim), for
+# EVERY per-block bench dir (b3e8e99 accidentally committed one block's
+# sim_build tree via `git add -A`; bd7e912 untracked it and added a local
+# tests/mdio_phy_model/.gitignore — this file generalizes that to all
+# benches, incl. the new sim_smoke).
+sim_build/
+sim_build_fake/
+# Bench variants that build a second simv with different params (clcd's
+# READP=1 read-path pass -> sim_build_readpath/results_readpath.xml; the
+# csr_decode_width per-block/mutant dirs -> sim_build_<block>...). No
+# sim_build_* variant is ever a source file.
+sim_build_*/
+# Mutated RTL written by a "must fail" control target (tests/dfx_ctl's
+# control-wdt-unclamp, tests/usr_access_rd's control-decode). A control has to
+# build the BROKEN RTL to be worth anything, and that RTL must never be mistaken
+# for a source file -- which is exactly how a mutant gets committed and then
+# read as the design.
+mutant/
+results.xml
+results_fake.xml
+results_readpath.xml
+ucli.key
+*.vcd
+*.fsdb
+*.daidir/
+csrc/
+vc_hdrs.h
+__pycache__/
+.pytest_cache/
+.coverage
+.coverage.*
+# VCS code-coverage artifacts (make COVERAGE=1 / make coverage — A5)
+cov_*.vdb/
+cov_report/
+cov_report_urg.log
+urgReport/
+cov_build.log
+cov_urg.log
+*.cm.log
+*.vdb.uf
+
+# transient sim artifacts
+nanosoc.f
+*.out

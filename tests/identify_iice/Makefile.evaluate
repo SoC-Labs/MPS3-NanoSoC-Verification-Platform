@@ -1,0 +1,137 @@
+# Makefile.evaluate -- the INTERACTIVE EVALUATION workflow.
+#
+# `make check` answers "is the harness correct?" and hands back an exit code.
+# This fragment answers the other question:
+#
+#     "if I had a real hardware bug, would this tooling find it, and would the
+#      output tell me where to look?"
+#
+#     make -C tests/identify_iice evaluate MODE=stuck
+#     make -C tests/identify_iice evaluate MODE=skew
+#     make -C tests/identify_iice evaluate MODE=late-divergence
+#     make -C tests/identify_iice evaluate MODE=clean          # positive control
+#     make -C tests/identify_iice evaluate-all                 # all four
+#
+# Reading aid: EVALUATING.md.  Contract: INTERFACES.md (frozen; nothing here
+# changes it).  Targets owned by this fragment, all prefixed to avoid colliding
+# with the parent's {gen,sim-fsdb,fake-hw,compare,negctl,check,clean,help}:
+#   evaluate  evaluate-all  evaluate-clean  evaluate-help  pytest-evaluate
+#
+# INTEGRATOR NOTE (one line, and it is not mine to add -- INTERFACES.md §5 gives
+# tests/identify_iice/Makefile to you):
+#
+#     -include $(HERE)/Makefile.evaluate
+#
+# next to the existing `-include`s of Makefile.sim / Makefile.compare.  Until
+# that line exists, `make -C tests/identify_iice evaluate` cannot see these
+# targets, because the parent includes its fragments BY NAME rather than by
+# wildcard.  Both invocations work in the meantime and afterwards:
+#
+#     make -C tests/identify_iice -f Makefile.evaluate evaluate MODE=stuck
+#     make -C tests/identify_iice evaluate MODE=stuck          # once included
+#
+# The `include` below pulls the parent in when this file is used standalone, and
+# the guard keeps that from happening in reverse (which would define every target
+# twice).
+
+ifndef IICE_EVALUATE_MK
+IICE_EVALUATE_MK := 1
+
+_EVAL_MK   := $(abspath $(lastword $(MAKEFILE_LIST)))
+_EVAL_HERE := $(patsubst %/,%,$(dir $(_EVAL_MK)))
+
+# Standalone use (`make -f Makefile.evaluate`): pull in the parent, which owns
+# gen / sim-fsdb and the exported HERE/BUILD/PYTHON/MANIFEST.  When the parent
+# already included US, it is in MAKEFILE_LIST and this is skipped.
+ifeq ($(filter %/Makefile,$(abspath $(MAKEFILE_LIST))),)
+include $(_EVAL_HERE)/Makefile
+endif
+
+HERE     ?= $(_EVAL_HERE)
+BUILD    ?= $(HERE)/build
+PYTHON   ?= python3
+MANIFEST ?= $(HERE)/signals_selftest.yaml
+
+EVALUATE_SH := $(HERE)/evaluate.sh
+EVAL_DIR    := $(BUILD)/evaluate
+
+# The menu.  `clean` is the positive control and is deliberately first in
+# evaluate-all: if it does not pass, no red result below it means anything.
+EVAL_MODES  := clean stuck skew late-divergence
+MODE        ?= stuck
+
+# `evaluate` re-runs the simulation by default, so the trace it judges is the
+# trace the current RTL produces.  EVAL_REUSE_SIM=1 reuses build/sim_iice.fsdb --
+# fine while iterating on the injectors, wrong when the DUT has changed.
+EVAL_PREREQS := gen sim-fsdb
+ifeq ($(EVAL_REUSE_SIM),1)
+EVAL_PREREQS :=
+endif
+
+.PHONY: evaluate evaluate-all evaluate-clean evaluate-help pytest-evaluate
+
+evaluate: $(EVAL_PREREQS)
+	@case " $(EVAL_MODES) " in \
+	   *" $(MODE) "*) ;; \
+	   *) echo "ERROR: MODE=$(MODE) is not one of: $(EVAL_MODES)"; \
+	      $(MAKE) --no-print-directory -f $(_EVAL_MK) evaluate-help; exit 2 ;; \
+	 esac
+	@bash $(EVALUATE_SH) $(MODE)
+
+# Deliberately NOT prefixed with '-': a mode that fails to find its own injected
+# divergence must fail the make invocation.  A `-` here is exactly how a gate
+# ends up reporting success (same reasoning as Makefile.compare's `compare`).
+evaluate-all: $(EVAL_PREREQS)
+	@set -e; for m in $(EVAL_MODES); do \
+	   echo; bash $(EVALUATE_SH) $$m; \
+	 done
+	@# late-divergence has TWO shapes and they exercise different code: the spin
+	@# loop keeps one timestamp per sample, the total freeze does not (fsdb2vcd
+	@# stops at the last transition) and so goes through the end-time-pinned grid
+	@# path. Running only the default would leave that path unexercised here --
+	@# `make check` negctl NC5 is the gate, this is the readable version.
+	@echo
+	@set -e; EVAL_STALL_SHAPE=freeze bash $(EVALUATE_SH) late-divergence
+	@echo "EVALUATE_ALL_OK  ($(EVAL_MODES) + late-divergence/freeze)"
+
+evaluate-clean:
+	rm -rf $(EVAL_DIR)
+
+# Pure Python, no VCS and no Verdi: the injectors' shapes and the reading.
+pytest-evaluate:
+	@cd $(HERE) && $(PYTHON) -m pytest tests/test_evaluate.py -q
+
+evaluate-help:
+	@echo "evaluate targets -- 'would this tooling find my bug?'"
+	@echo ""
+	@echo "  make evaluate MODE=<mode>   run the loop against an injected bug"
+	@echo "  make evaluate-all           every mode, positive control first"
+	@echo "  make evaluate-clean         remove $(EVAL_DIR)"
+	@echo "  make pytest-evaluate        unit tests (no VCS, no Verdi)"
+	@echo ""
+	@echo "  MODE=clean            no injection - the positive control (MATCH)"
+	@echo "  MODE=stuck            one bus bit held constant from a sample onward"
+	@echo "                        (the LAN8720/RMII class)"
+	@echo "  MODE=skew             hardware lags the model by one sample on one"
+	@echo "                        signal (the CDC / sampling-phase class)"
+	@echo "  MODE=late-divergence  hardware tracks the model, then stops"
+	@echo "                        advancing and never recovers (boots-then-wedges)"
+	@echo ""
+	@echo "  EVAL_STALL_SHAPE=freeze"
+	@echo "                        late-divergence only: total stall instead of a"
+	@echo "                        spin loop, so the hardware tail carries NO value"
+	@echo "                        change. Reported as a named MISMATCH since"
+	@echo "                        2026-07-30 (the grid is pinned by the FSDB's own"
+	@echo "                        end time); it used to exit 2. evaluate-all runs it."
+	@echo "  EVAL_REUSE_SIM=1      do not re-run the sim; reuse build/sim_iice.fsdb"
+	@echo "  IICE_NO_NCOMPARE=1    skip the nCompare cross-check"
+	@echo ""
+	@echo "  artifacts land in $(EVAL_DIR)/<mode>/ :"
+	@echo "    compare_report.txt  verdict, first diverging sample, per-signal counts"
+	@echo "    iice_<mode>.jf      joined FSDB -> nWave -ssf <file>"
+	@echo "    interpretation.txt  what the pattern is consistent with, and is not"
+	@echo ""
+	@echo "  exit 0 = the tooling did its job; 1 = it did NOT; 2 = could not run."
+	@echo "  Read EVALUATING.md before trusting any of it."
+
+endif # IICE_EVALUATE_MK

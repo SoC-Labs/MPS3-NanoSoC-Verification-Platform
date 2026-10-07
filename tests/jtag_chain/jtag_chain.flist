@@ -1,0 +1,53 @@
+//-----------------------------------------------------------------------------
+// jtag_chain.flist — the RTL under the two-TAP chain bench.
+// A joint work commissioned on behalf of SoC Labs, under Arm Academic Access license.
+//
+// Copyright (C) 2026, SoC Labs (www.soclabs.org)
+//-----------------------------------------------------------------------------
+// The Arm SoC-400 CoreSight RTL under $(ARM_IP_LIBRARY_PATH) is CONFIDENTIAL
+// (Arm Academic Access) and is read-only, lab-wide collateral. It is referenced
+// IN PLACE by absolute path via env vars. NOTHING is copied into this repo and
+// nothing committed here quotes it.
+//
+// WHERE THE SoC-400 WRAPPERS LIVE — read this before "fixing" a path.
+// tests/jtag_dap_bringup/jtag_dap_bringup.flist (2026-08) reads them from
+//     $(NANOSOC_MULTICORE_HOME)/coresight_soc400/rtl/*.v
+// That directory NO LONGER EXISTS: the multicore tree moved its wrappers into
+// the SHARED tech block, a real git submodule
+//     $(SOCLABS_CORESIGHT_SOC400_TECH_DIR) =
+//         $(NANOSOC_MULTICORE_HOME)/nanosoc_arch_tech/rtl/coresight_soc400_tech
+// which ships its own flist for exactly this purpose, and whose
+// nanosoc_swj_dap_ss.v is now ONE parameterised block (NUM_AP) replacing the
+// old _single/_multi pair. That tech block carries NO Arm IP and no Arm file
+// manifest; the CONSUMER adds the two Arm lists, which is what this file does.
+// This bench uses NUM_AP=1 — the fielded single-core nanoSoC configuration.
+//
+// Required env (see the Makefile; NANOSOC_MULTICORE_HOME has NO default):
+//   NANOSOC_MULTICORE_HOME             the multicore DUT checkout
+//   SOCLABS_CORESIGHT_SOC400_TECH_DIR  the shared SoC-400 tech block
+//   SOCLABS_SLCOREM0_TECH_DIR          slcorem0 wrapper + Cortex-M0-QS IP flists
+//   ARM_IP_LIBRARY_PATH                vendor IP root (cxdapswjdp/cxdapahbap/M0)
+//   REPO_ROOT                          this repository (for the RM shim)
+//-----------------------------------------------------------------------------
+
+// SoC Labs SWJ-DAP wrappers (NO Arm IP in this list).
+-f $(SOCLABS_CORESIGHT_SOC400_TECH_DIR)/flist/coresight_soc400_swjdap.flist
+
+// The Arm cells those wrappers instantiate, from the licensed read-only library.
+-f $(NANOSOC_MULTICORE_HOME)/coresight_soc400/flist/coresight_soc400_ahbap.flist
+-f $(NANOSOC_MULTICORE_HOME)/coresight_soc400/flist/coresight_soc400_swjdp.flist
+
+// slcorem0 wrapper + Cortex-M0-QS IP (pulls in $(ARM_IP_LIBRARY_PATH) M0 files).
+-f $(SOCLABS_SLCOREM0_TECH_DIR)/flist/slcorem0_qs.flist
+
+// ---- THE DESIGN UNDER TEST -------------------------------------------------
+// The real RM top, compiled from the RM directory. Not a copy: if this file
+// stops being the chain splice, this bench stops passing.
+$(REPO_ROOT)/fpga/rp/nanosoc_iice/rp_nanosoc_iice_shim.sv
+
+// ---- bench-side stand-in for the instrumented EDIF cell, + the soft TAP -----
+// check_core_stub_ports.py holds iice_core_stub.sv to the 39-port instrumented
+// boundary derived from the REAL rp_nanosoc_iice_core.sv; the Makefile runs it
+// before compiling.
+$(REPO_ROOT)/tests/jtag_chain/iice_soft_tap_model.sv
+$(REPO_ROOT)/tests/jtag_chain/iice_core_stub.sv

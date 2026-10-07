@@ -1,0 +1,68 @@
+{
+  "_what": "Sidecar, NOT a manifest.json. Records the QSPI flash image and the rm_nanosoc_upy stage-0 bootrom as a MATCHED PAIR. See fpga/rp/nanosoc_upy/README.md.",
+  "recorded": "2026-09-23",
+  "recorded_by": "lane IMAGES, ILA mint wave (worktree feat/rm-ila-mint)",
+  "silicon_status": "NOT FLASHED. Built board-free, reproducible. W1 (2026-09-24) programs it; see README.md 'W1 re-flash'.",
+  "image": {
+    "path": "firmware/micropython/build/xip/flash_image.bin",
+    "build": "make -C firmware/micropython xip SOURCE_DATE_EPOCH=1786110110",
+    "md5": "45017bb6c1c0c3d09ba31433dd190839",
+    "crc32": "0x0DBE004A",
+    "size_bytes": 163840,
+    "flash_offset": "0x0",
+    "flash_end_exclusive": "0x28000",
+    "layout": {
+      "boot_table": {"offset": "0x0", "magic": "0x424F4F54 (BOOT)", "version": 1, "entries": 1},
+      "hot": {"offset": "0x1000", "size_bytes": 40020, "crc32": "0xF7E850CB", "md5": "b2d702d7f1f0a3e726b6479014729de0", "copied_to": "IMEM 0x10000000"},
+      "cold": {"offset": "0x20000", "size_bytes": 28780, "md5": "1b995e7937e7ffd7e303c7d255efd456", "xip_aperture": "0x70020000"}
+    },
+    "elf_md5": "e348f14d41f52ea451806a9f4521f21f",
+    "banner_string": "MicroPython 532428cc6d on 2026-08-07",
+    "source": {
+      "repo_head": "0130a3ad4b808c5220d8e4f61cdbb66efe622284",
+      "firmware_micropython_last_commit": "875db8bb3c3ce9fb4c498a0fe73e670a1089e7ea",
+      "firmware_micropython_uncommitted": "Makefile: SOURCE_DATE_EPOCH pin only (does not change the bytes when SOURCE_DATE_EPOCH is passed explicitly as above)",
+      "vendor_micropython_rev": "532428cc6d85b1183a43bf82ca789e3f3f99fd1f",
+      "toolchain": "GNU Arm Embedded 10.3-2021.10 (arm-none-eabi-gcc 10.3.1 20210824)"
+    },
+    "reproducibility": "two clean builds, different TZ (UTC / Pacific/Auckland), PYTHONHASHSEED (3 / 12345) and source paths (worktree / scratch copy): byte-identical flash_image.bin, flash_image_byte.hex, micropython_hot.bin, micropython_cold.bin, micropython_hot_word.hex",
+    "vs_july_image": "main checkout firmware/micropython/build/xip/flash_image.bin (2026-07-15, md5 ab6b3a30e2708f96c5fbb268e4124745, crc32 0x6133A3D8) differs in EXACTLY 3 bytes: the banner date '2026-07-15' vs '2026-08-07' in the cold segment. HOT is byte-identical."
+  },
+  "bootrom": {
+    "knob": "fpga/dfx/Makefile rm_nanosoc_upy: FPGA_BOOTROM_DIR=$(XIP_BOOTROM_OUT) = $(BUILD)/rm_nanosoc_upy_synth/bootrom, built at synth time by tests/micropython_flash_boot/tools/build_bootrom.sh from $SOCLABS_NANOSOC_SOC_DIR (NOT the Makefile-wide FPGA_BOOTROM_DIR default)",
+    "soc_tree": "<SOCLABS_NANOSOC_SOC_DIR> @ c48693ab8956833dfde8cc15833a17f799741bd5 (tools.env)",
+    "stage0_bin_md5": "7d7ee052470e0a6d5180bf91495901d3",
+    "stage0_hex_md5": "ea4f3030e67b32847dbe9b41f60bd26f",
+    "bootrom_sv_md5": "176684ace65bd948cde33c2d865683ae",
+    "bootrom_bintxt_md5": "9741cf487d1ebc6917f6156ca5d55312",
+    "nanosoc_region_bootrom_v_md5": "4d0f5e836b4ebae0d5fb5437a58edc92",
+    "inputs_md5": {
+      "stage0_bootloader.c": "763a84e354ca2a83b94cf7c335feec78",
+      "boot_table.h": "b7d1bb2f0911e95f3d30a4bb4580e24c",
+      "imp/fpga/fw_config/nanosoc_memmap.h (gitignored, regenerated 2026-09-23 11:47)": "41aa8ed04ef82a14ea2f5211227ae50a"
+    },
+    "reproducibility": "two clean builds (TZ UTC / Asia/Tokyo, PYTHONHASHSEED 1 / 77, different out dirs): byte-identical stage0.bin/.hex, bootrom.sv, bootrom.bintxt, nanosoc_region_bootrom.v",
+    "same_as_fielded": "stage0.bin md5 is IDENTICAL to the 0x3F1A560F mint's (fpga/dfx/build_mint_2026_09/rm_nanosoc_upy_synth/bootrom), the 0xA8C1C535 mint's (build_mint/rm_nanosoc_upy_xip_synth) and the July co-sim build (tests/micropython_flash_boot/build, 2026-07-15)"
+  },
+  "clock": {
+    "dut_clk_hz": 50000000,
+    "stage0_uart2_bauddiv": 651,
+    "stage0_macro_NANOSOC_SYS_CLK_FREQ_HZ": 25000000,
+    "micropython_uart2_bauddiv": 651,
+    "console_baud_at_50mhz": 76800,
+    "note": "stage-0 computes BAUDDIV = NANOSOC_SYS_CLK_FREQ_HZ/38400 = 25e6/38400 = 651 (literal 0x28B in stage0.elf); at the real 50 MHz dut_clk that is 76800 baud, the shell uart_axis_shim rate, and equal to MicroPython's 651. Do NOT rebuild the bootrom with -DNANOSOC_SYS_CLK_FREQ_HZ=50000000: BAUDDIV would become 1302 (38400 baud) and the stage-0 line would garble on 6930."
+  },
+  "expected_boot": {
+    "stage0_line_on_6930": "~BQ then I=18010000,000083B5 V=... M=00000001 W=18010000,000083B5 R",
+    "stage0_vector_W": "18010000,000083B5",
+    "from_image": "HOT word0 (SP) = 0x18010000, word1 (Reset_Handler|1) = 0x000083B5, read from flash_image.bin @0x1000",
+    "empty_flash": "W=00000000 then silence (July negative control)"
+  },
+  "rm": {
+    "rm_key": "rm_nanosoc_upy",
+    "rm_id": "0x01000005",
+    "imem_bytes": 131072,
+    "dmem_bytes": 65536,
+    "imem_baked": "all zeros (UPY_IMEM_IMG = imem_empty_word.hex)"
+  }
+}

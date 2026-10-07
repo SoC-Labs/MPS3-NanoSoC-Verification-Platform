@@ -1,0 +1,377 @@
+{
+  "_generated": "gen_regmap.py -- DO NOT EDIT. Derived from fpga/shell/bd/shell_bd.tcl, fpga/shell/bd/cpu_mbv.tcl, fpga/shell/bd/touch_iic_add.tcl and the CSR RTL; owners from gen_regmap.py MBV_OWNERS. Contract: docs/planning/linux_lanes/SHELL_CONTRACT.md",
+  "variant": "SHELL_CPU=mbv",
+  "cpu": {
+    "cell": "microblaze_riscv_0",
+    "updatemem_proc": "u_shell/shell_bd_i/microblaze_riscv_0",
+    "isa": "rv32imac_zba_zbb_zbs",
+    "isa_note": "no zicbom (no such IP parameter); do NOT advertise sstc (errata E1/E2)",
+    "mmu": "sv32",
+    "clock_hz": 100000000,
+    "reset_vector": "0x00000000",
+    "cache_aperture": [
+      "0x80000000",
+      "0xBFFFFFFF"
+    ]
+  },
+  "memories": [
+    {
+      "name": "LMB",
+      "base": "0x00000000",
+      "size": "0x00020000",
+      "owner": "stage0+harnessd",
+      "cached": false,
+      "note": "the MBV's own ILMB/DLMB (TDP BRAM local_ram); reset vector"
+    },
+    {
+      "name": "DDR4",
+      "base": "0x80000000",
+      "size": "0x40000000",
+      "owner": "kernel",
+      "cached": true,
+      "note": "MIG ddr4_0 via smartconnect_ddr; == the I/D-cache aperture"
+    }
+  ],
+  "lmb_map": [
+    {
+      "name": "stage0",
+      "base": "0x00000000",
+      "size": "0x0001FE00",
+      "owner": "STAGE0"
+    },
+    {
+      "name": "stage0_status",
+      "base": "0x0001FE00",
+      "size": "0x00000100",
+      "owner": "STAGE0"
+    },
+    {
+      "name": "diag_mailbox",
+      "base": "0x0001FF00",
+      "size": "0x00000100",
+      "owner": "HARNESSD"
+    }
+  ],
+  "blocks": [
+    {
+      "name": "LMB_TAIL",
+      "base": "0x0001F000",
+      "size": "0x00001000",
+      "cell": "local_ram",
+      "gate": null,
+      "regs_from": "lmb_map",
+      "owner": "harnessd",
+      "irq": null,
+      "kind": "window",
+      "consumer": "diag mailbox v8 at +0xF00; stage0 status block at +0xE00 (harnessd reads it, never writes)"
+    },
+    {
+      "name": "UARTLITE",
+      "base": "0x40600000",
+      "size": "0x00010000",
+      "cell": "axi_uartlite_0",
+      "gate": null,
+      "regs_from": "vendor-pg",
+      "owner": "kernel",
+      "consumer": "console ttyUL0 -- xlnx,xps-uartlite-1.00.a",
+      "kind": "slave",
+      "irq": 2
+    },
+    {
+      "name": "INTC",
+      "base": "0x41200000",
+      "size": "0x00010000",
+      "cell": "axi_intc_0",
+      "gate": null,
+      "regs_from": "vendor-pg",
+      "owner": "kernel",
+      "consumer": "root irqchip -- xlnx,xps-intc-1.00.a, kind-of-intr 0x0",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "TIMER",
+      "base": "0x41C00000",
+      "size": "0x00010000",
+      "cell": "axi_timer_0",
+      "gate": null,
+      "regs_from": "vendor-pg",
+      "owner": "kernel",
+      "consumer": "clockevent -- soclabs,mbv-timer (errata E1/E2) + xlnx,xps-timer-1.00.a",
+      "kind": "slave",
+      "irq": 1
+    },
+    {
+      "name": "CLKRST",
+      "base": "0x44A00000",
+      "size": "0x00010000",
+      "cell": "dut_clkrst_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "clkrst service",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "DFXCTL",
+      "base": "0x44A10000",
+      "size": "0x00010000",
+      "cell": "dfx_ctl_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "swap_fsm (decoupler clamp, RM verify)",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "HWICAP",
+      "base": "0x44A20000",
+      "size": "0x00010000",
+      "cell": "axi_hwicap_0",
+      "gate": null,
+      "regs_from": "vendor-pg",
+      "owner": "harnessd",
+      "consumer": "swap_fsm / config_agent (ICAP writes)",
+      "kind": "slave",
+      "irq": 0
+    },
+    {
+      "name": "VPHY",
+      "base": "0x44A30000",
+      "size": "0x00001000",
+      "cell": "eth_mac_test_subsystem_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "coordinator link/macgen",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "USD",
+      "base": "0x44A40000",
+      "size": "0x00010000",
+      "cell": "usd_spi_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "kernel",
+      "consumer": "uSD -- spi-usd controller -> mmc_spi -> mmcblk0 (D13's usd_spi_0 at 0x44A4)",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "TELEM",
+      "base": "0x44A50000",
+      "size": "0x00010000",
+      "cell": "telem_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "coordinator; STATUS[0] = DDR4 calib in mbv (stage0 reads it first)",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "GENCHK",
+      "base": "0x44A60000",
+      "size": "0x00001000",
+      "cell": "eth_mac_test_subsystem_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "coordinator macgen",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "JTAGBB",
+      "base": "0x44A70000",
+      "size": "0x00010000",
+      "cell": "jtag_bb_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "jtag_server :6921 / xvc_server",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "DBGBR",
+      "base": "0x44A80000",
+      "size": "0x00010000",
+      "cell": "debug_bridge_0",
+      "gate": null,
+      "regs_from": "vendor-pg",
+      "owner": "harnessd",
+      "consumer": "xvc_server :2542 (debug_bridge)",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "UARTBR",
+      "base": "0x44A90000",
+      "size": "0x00010000",
+      "cell": "uart_bridge_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "uart_over_eth :6930-6932",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "GPIO",
+      "base": "0x44AA0000",
+      "size": "0x00010000",
+      "cell": "board_gpio_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "heartbeat LED, switches",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "MMCM_DRP",
+      "base": "0x44AB0000",
+      "size": "0x00010000",
+      "cell": "clk_wiz_dut",
+      "gate": null,
+      "regs_from": "vendor-pg",
+      "owner": "harnessd",
+      "consumer": "clkrst set_clk (DUT MMCM DRP)",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "CLCD",
+      "base": "0x44AC0000",
+      "size": "0x00010000",
+      "cell": "clcd_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "clcd status/apps pages",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "CLCDKVM",
+      "base": "0x44AD0000",
+      "size": "0x00010000",
+      "cell": "clcd_kvm_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "clcd_kvm",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "TOUCH",
+      "base": "0x44AE0000",
+      "size": "0x00010000",
+      "cell": "touch_iic_0",
+      "gate": "SHELL_TOUCH",
+      "regs_from": "vendor-pg",
+      "owner": "harnessd",
+      "consumer": "touch (polls the STMPE811 over I2C; never the INTC)",
+      "kind": "slave",
+      "irq": 4
+    },
+    {
+      "name": "DUTEGR",
+      "base": "0x44B20000",
+      "size": "0x00010000",
+      "cell": "dut_egress_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "coordinator dutrx",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "USRACC",
+      "base": "0x44B30000",
+      "size": "0x00010000",
+      "cell": "usr_access_rd_0",
+      "gate": null,
+      "regs_from": "rtl",
+      "owner": "harnessd",
+      "consumer": "coordinator version (usr_access)",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "WDOG",
+      "base": "0x44B40000",
+      "size": "0x00010000",
+      "cell": "axi_timebase_wdt_0",
+      "gate": null,
+      "regs_from": "vendor-pg",
+      "owner": "harnessd",
+      "consumer": "kicked from the harnessd service loop",
+      "kind": "slave",
+      "irq": null
+    },
+    {
+      "name": "LAN9220",
+      "base": "0xC0000000",
+      "size": "0x01000000",
+      "cell": "axi_emc_0",
+      "gate": null,
+      "regs_from": "vendor-pg",
+      "owner": "kernel",
+      "consumer": "eth0 -- smsc,lan9220 (native active-low IRQ, inverted in shell_top)",
+      "kind": "slave",
+      "irq": 3
+    }
+  ],
+  "irqs": [
+    {
+      "in": 0,
+      "source": "axi_hwicap_0/ip2intc_irpt",
+      "block": "HWICAP",
+      "gate": null,
+      "owner": "harnessd"
+    },
+    {
+      "in": 1,
+      "source": "axi_timer_0/interrupt",
+      "block": "TIMER",
+      "gate": null,
+      "owner": "kernel"
+    },
+    {
+      "in": 2,
+      "source": "axi_uartlite_0/interrupt",
+      "block": "UARTLITE",
+      "gate": null,
+      "owner": "kernel"
+    },
+    {
+      "in": 3,
+      "source": "port eth_irq",
+      "block": "LAN9220",
+      "gate": null,
+      "owner": "kernel"
+    },
+    {
+      "in": 4,
+      "source": "port clcd_tint_i",
+      "block": "TOUCH",
+      "gate": "SHELL_TOUCH",
+      "owner": "harnessd"
+    }
+  ],
+  "ddr_calib": {
+    "block": "TELEM",
+    "enable": "CTRL (+0x00) bit 1 = 1",
+    "read": "STATUS (+0x10) bit 0",
+    "source": "ddr4_0/c0_init_calib_complete"
+  },
+  "pending_owners": {}
+}

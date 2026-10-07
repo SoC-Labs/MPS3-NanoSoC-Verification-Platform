@@ -1,0 +1,182 @@
+# static_inputs.txt -- WHICH SOURCES DECIDE THE STATIC SHELL.
+#
+# Read by fpga/dfx/tools/static_canon.py, which hashes exactly the files this
+# file declares into `static_canon` -- the CONTENT identity of the static,
+# recorded beside `static_id` in mint.json.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# `static_id` is a CRC-32 of static_routed_locked.dcp, and a .dcp is a zip with
+# embedded timestamps. So a rebuild from byte-identical sources mints a DIFFERENT
+# static_id, and two questions have no answer anywhere:
+#
+#     "is this the same shell?"      -- the id says no even when nothing moved
+#     "did anything actually change?" -- nothing on disk can say
+#
+# A hash over the INPUTS answers both. But a hash over inputs is only as good as
+# the list of inputs, and a list of files is the classic place for a gate to rot
+# quietly: a source file is added, nobody adds it here, and the hash goes on
+# reporting "unchanged" forever. So this declaration is GATED, not trusted --
+# see "The three rules" below.
+#
+# FORMAT
+# ------
+#   root    <dir>             a repo-relative DIRECTORY whose design-source
+#                             files must ALL be accounted for (include or
+#                             exclude), recursively. Not a glob: a plain prefix.
+#   include <glob>            a file that DOES reach the static netlist -> HASHED
+#   exclude <glob>  # reason  a file under a root that does NOT -> not hashed
+#
+# Globs are fnmatch against the full repo-relative path, and `*` matches any
+# character INCLUDING `/`. One rule, no `**` subtleties: `fpga/dfx/rms/*` covers
+# that whole subtree.
+#
+# PRECEDENCE: include beats exclude. That is what lets a broad exclude carry the
+# rationale for a whole subtree while one file inside it is still hashed
+# (fpga/dfx/rms/* vs rm_greybox, below).
+#
+# THE THREE RULES (static_canon.py check -- all three have a control in
+# tests/dfx_flow/test_static_canon.py):
+#   1. every `include` glob must match at least one tracked file. A glob that
+#      matches nothing is a declaration that has silently stopped covering
+#      anything, and it looks exactly like a healthy one.
+#   2. every design-source file under every `root` must be matched by an
+#      `include` or an `exclude`. An undeclared file is a hard failure naming
+#      the file -- this is what stops the hash from rotting.
+#   3. every `exclude` must carry a `# reason`. "Not hashed" is a claim about
+#      the build, and an unexplained one is indistinguishable from an oversight.
+#
+# DESIGN-SOURCE EXTENSIONS (rule 2's scope): .sv .v .svh .vh .xdc .tcl .xml
+# .yaml .yml. Anything else under a root is out of scope -- reports, READMEs,
+# firmware C. Firmware is deliberately NOT here: it is baked in by `updatemem`
+# AFTER place-and-route, so it changes the .bit without changing the netlist.
+# That axis is HARNESS_VER32 / USR_ACCESS, not this one
+# (docs/VERSIONING_PLAN.md §3.0).
+#
+# THE FILE SET IS `git ls-files`, i.e. TRACKED files only. An untracked source
+# is unreproducible by definition; `sources.repo.dirty` in mint.json is what
+# records that the tree had uncommitted content at all.
+
+# --------------------------------------------------------------------------
+# roots -- everything design-source under these must be declared
+# --------------------------------------------------------------------------
+root fpga/shell
+root fpga/ethernet
+root fpga/dfx
+
+# --------------------------------------------------------------------------
+# the static shell itself (fpga/shell/build_shell.tcl reads every one of these)
+# --------------------------------------------------------------------------
+include fpga/shell/build_shell.tcl
+include fpga/shell/shell_top.sv
+include fpga/shell/rp_dut_stub.sv
+# EVERY block-design Tcl, as one glob (FLOW, 2026-09-23). shell_bd.tcl sources the
+# CPU seam (cpu_mb.tcl | cpu_mbv.tcl, per SHELL_CPU), the DDR4 MIG config
+# (ddr4_mig.tcl, mbv) and touch_iic_add.tcl; a per-file list here would have to be
+# edited in the same commit as every new fragment, and the one that was not is
+# the one the digest silently stops covering. Both seam files are hashed in BOTH
+# builds -- conservative, the direction this file already errs in (SHELL_TOUCH);
+# what separates an mb static from an mbv one is the SHELL_CPU=mbv flag and the
+# tool version, which the mbv mint adds to the digest. axijtag_uart_carry.tcl
+# (the KR260/haps carry variant, which shell_bd.tcl does not source) is hashed
+# too, for the same conservative reason; it used to be excluded by name.
+include fpga/shell/bd/*.tcl
+# The IP packaging recipes: package_csr_ip.tcl (2024.1, into the tracked
+# ip_packaged/) and fpga/shell/tools/package_ip_build.tcl (any other Vivado --
+# the 2026.1 MBV build -- into the BUILD dir; SHELL_CONTRACT.md §8). One glob so
+# the second is covered the day it is tracked, without a rule-1 failure before.
+include fpga/shell/*/package_*.tcl
+# `*` matches `/` here (see FORMAT above), so this ONE glob covers every CSR
+# block's whole subtree: fpga/shell/ip/<block>/<anything>.sv. Two consequences
+# worth stating, because both have been asked:
+#   * dut_egress (2026-09-11, e2062c1) needed NO new line -- dut_egress.sv and
+#     dutegr_cfifo.sv are already hashed, confirmed by `static_canon list`.
+#   * a NEW block that ships only .sv under fpga/shell/ip/ needs no line either.
+#     A new block that ships a .xdc, a .tcl, an .xci-generating script or a .yaml
+#     under that tree DOES: those extensions are design sources (rule 2's scope)
+#     and an undeclared one is a hard `canon-check` failure naming the file.
+include fpga/shell/ip/*.sv
+include fpga/shell/constraints/*.xdc
+include fpga/shell/constraints_realphy/*.xdc
+
+# --------------------------------------------------------------------------
+# PLACEHOLDER -- NOT YET DECLARABLE (MINT-PREP, 2026-09-14)
+# --------------------------------------------------------------------------
+# The IDENTITY-REG lane is adding a USR_ACCESS readback CSR (fpga/shell/ip/
+# usr_access_rd/) and an AXI watchdog to fpga/shell/bd/shell_bd.tcl in this same
+# batch. NEITHER IS ON DISK YET, so nothing can be declared for them here: an
+# `include` glob that matches no tracked file is a rule-1 failure, and a rule-1
+# failure is indistinguishable from a declaration that has quietly stopped
+# covering anything. That is the whole point of rule 1, so this stays a comment.
+#
+# WHAT IS ALREADY COVERED when they land, with no edit to this file:
+#   * fpga/shell/ip/usr_access_rd/*.sv        -- by `include fpga/shell/ip/*.sv`
+#   * the BD instantiation + address assignment -- by `include .../shell_bd.tcl`
+#   * a Xilinx watchdog IP configured only inside shell_bd.tcl (no local RTL)
+#                                             -- by the same shell_bd.tcl line
+#
+# WHAT NEEDS A LINE ADDED HERE, and the line to add:
+#   * a constraint file shipped with the block:
+#         include fpga/shell/ip/usr_access_rd/*.xdc
+#   * a packaging or generation script shipped with the block:
+#         include fpga/shell/ip/usr_access_rd/*.tcl
+#   * the block living anywhere OUTSIDE the three declared roots (fpga/shell,
+#     fpga/ethernet, fpga/dfx) -- then it needs a `root` line too, not just an
+#     include, or rule 2 cannot see the directory at all.
+#
+# HOW TO KNOW WHICH: run `make -C fpga/dfx canon-check` after the block lands.
+# It either passes (covered) or names the exact undeclared file. Do not guess,
+# and do not pre-declare -- a glob added early fails rule 1 today and is then
+# "fixed" by deleting it, which is how the real declaration gets lost.
+
+# The virtual-PHY / MAC subsystem. It is packaged from fpga/ethernet/, a SIBLING
+# of fpga/shell/ (package_csr_ip.tcl's eth_dir), which is exactly the kind of
+# input a hand-written list forgets -- rule 2 is what found it.
+include fpga/ethernet/eth_mac_test_subsystem.sv
+include fpga/ethernet/bridge/*.sv
+include fpga/ethernet/gen_checker/*.sv
+include fpga/ethernet/link_partner_mac/*.sv
+include fpga/ethernet/mdio_phy_model/*.sv
+include fpga/ethernet/rmii_phy_if/*.sv
+
+# --------------------------------------------------------------------------
+# the DFX implementation OF that shell -- these decide the routed, locked static
+# --------------------------------------------------------------------------
+include fpga/dfx/build_dfx.tcl
+include fpga/dfx/dfx_floorplan.xdc
+include fpga/dfx/rm_list.tcl
+include fpga/dfx/tools/overlay_inputs.tcl
+# The REFERENCE RM. Its config is the one that gets routed, black-boxed and
+# lock_design'd into static_routed_locked.dcp (build_dfx.tcl's `if {$first}`
+# block), so its wrapper is an input to the static -- unlike every other RM,
+# which is routed AGAINST the already-locked static and cannot move it.
+include fpga/dfx/rms/rm_greybox/rm_greybox.sv
+
+# --------------------------------------------------------------------------
+# excluded, with the reason
+# --------------------------------------------------------------------------
+exclude fpga/shell/boundary.yaml # the RP boundary CONTRACT, read by pin_check.py; no Vivado flow reads it
+exclude fpga/shell/validate_bd.tcl # BD-only fast validation driver; build_shell.tcl never sources it
+exclude fpga/shell/generated/* # skeletons generated FOR RM authors; in no fileset
+exclude fpga/shell/tools/shell_bd_guards.tcl # READ-ONLY post-validate guards (SHELL_CONTRACT.md): may refuse a BD, can create/connect/set nothing
+exclude fpga/shell/tools/bd_dump.tcl # BD property dump for tests/shell_cpu_seam; never part of a build
+exclude fpga/shell/tools/shell_bd_dump_run.tcl # driver for that dump (tests/shell_cpu_seam); never part of a build
+exclude fpga/shell/tools/clock_slack_report.tcl # report-only: opens a routed dcp and reads timing; creates/sets nothing in any build
+exclude fpga/shell/tools/xdc_gate.tcl # read-only XDC gate: can fail a build, changes no constraint or netlist
+exclude fpga/shell/ip_packaged/pkg_smoke_eth.tcl # packaging smoke driver, run by hand
+exclude fpga/shell/ip/lcd_mirror/ooc_synth.tcl # the snooper's standalone OOC synth/P&R report driver, run by hand; no shell build sources it (lcd_mirror is not in the BD until mint 4)
+exclude fpga/shell/ip/lcd_mirror/lcd_mirror_ooc.xdc # OOC-only timing read by ooc_synth.tcl alone; build_shell.tcl globs constraints/ only, never ip/
+exclude fpga/shell/ip_packaged/*/* # REGENERATED IP-XACT output (ip_packaged/.gitignore); the durable source is fpga/shell/ip/ and fpga/ethernet/
+exclude fpga/shell/build_results_*/* # evidence reports from past runs
+exclude fpga/ethernet/lan9220_if/* # stub by decision; neither endpoint exists in the BD (shell_bd.tcl:1277)
+exclude fpga/dfx/proof/* # the minimal stand-in static for flow debugging; never the product shell
+exclude fpga/dfx/prod_results_*/* # evidence from past runs
+exclude fpga/dfx/rms/* # every NON-reference RM: routed against the ALREADY-LOCKED static, so it cannot change it (rm_greybox is included above)
+exclude fpga/dfx/tools/bank_gate.tcl # post-hoc I/O-bank report; reads a routed dcp, writes nothing back
+exclude fpga/dfx/tools/finish_partials.tcl # recovery path: re-writes PARTIALS from an existing locked static
+exclude fpga/dfx/tools/write_mem_info.tcl # emits the .mmi for updatemem, i.e. firmware baking, after P&R
+exclude fpga/dfx/tools/static_stamp.tcl # RECORDS the config-register stamps after write_bitstream; writes no design property
+exclude fpga/dfx/tools/ooc_inline.tcl # early-warning OOC synth of ONE inline RM into a scratch dir (tools/ooc_early_warning.sh); never part of a mint
+exclude fpga/dfx/tools/vivado_version.tcl # refuses a checkpoint another Vivado wrote (build_dfx.tcl); reads dcp.xml, sets no design property
+exclude fpga/dfx/tools/dfx_jobs.tcl # DFX_JOBS phase bookkeeping (state/row record files, phase dispatch); every design operation stays in build_dfx.tcl, which is included
+exclude fpga/dfx/tools/debug_probes.tcl # the per-RM partial .ltx + RP-pin/DRC gates; runs on each routed config AFTER the static is locked and its id minted, sets no design property

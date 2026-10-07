@@ -1,0 +1,15 @@
+# sha256 of fpga/shell/tools/bd_dump.tcl output (every non-# line), Vivado 2024.1, SHELL_CPU=mb SHELL_TOUCH=1 SHELL_REALPHY=0
+# baseline = the pre-seam shell_bd.tcl/touch_iic_add.tcl at eafe787 (what the 2026-10 ILA mint was built from)
+# regenerate + verify: tests/shell_cpu_seam/run_seam_gate.sh
+# mb_touch1_body_*     = the eafe787 BASELINE dump (step 1 re-checks it: tool/dump drift)
+# mb_touch1_d13_body_* = the SHELL_CPU=mb dump after D13 (usd_spi_0 at 0x44A4); it
+#                        differs from the baseline by exactly d13_usd_delta_mb.txt
+#                        (history: superseded by the INJ line below)
+# mb_touch1_inj_body_* = THIS tree's SHELL_CPU=mb dump after INJ (the DUTEGR inject
+#                        path); baseline -> it = d13_usd_delta_mb.txt + inj_dutegr_delta_mb.txt
+mb_touch1_body_sha256 98b4e2bd6d75a4d2aa38cba0c4c4db22aef6fedc130cccf7ca4b57c96abc67a0
+mb_touch1_body_lines 14063
+mb_touch1_d13_body_sha256 17b5f6baf8708c58d4cce19ddc29135af005186ae5192a9930fccdc86dddc686
+mb_touch1_d13_body_lines 14037
+mb_touch1_inj_body_sha256 a68876f01b906a25e0f5872f61ee17c2e96f361c1ebb896bc57bbc7ab513cc29
+mb_touch1_inj_body_lines 14045

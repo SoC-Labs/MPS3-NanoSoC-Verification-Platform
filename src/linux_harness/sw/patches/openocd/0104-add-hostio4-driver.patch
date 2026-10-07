@@ -1,0 +1,1464 @@
+From: SoC Labs
+Subject: [PATCH] add the hostio4 adapter driver source
+
+src/jtag/drivers/hostio4.c, VERBATIM from github.com/SoC-Labs/
+NanoSoC-Ethernet-Chiplet @ 057d317c1463 ("hostio4: byte-exact sub-word
+access, bounded waits, block-write guard, and the tests that prove them"),
+scripts/rig/eth_chiplet/openocd_hostio4/hostio4.c. GPL-2.0-or-later (its SPDX
+line). Carried as a new-file patch, sha-pinned (README.md; tests/run.sh).
+
+--- /dev/null
++++ b/src/jtag/drivers/hostio4.c
+@@ -0,0 +1,1452 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++/*
++ * OpenOCD adapter driver for the nanoSoC HOSTIO4 / ADP ASCII debug monitor.
++ *
++ * The chiplet exposes an ASCII command monitor that sits on an AHB master.
++ * It offers "set address", "read word (auto-increment)", "write word",
++ * "block read" and "block upload".  It is NOT a CoreSight DAP: there is no
++ * DP, no AP register file, and the AHB decoder has no 0xE0/0xA0/0xB0 region,
++ * so the Cortex-M PPB is unreachable through it.
++ *
++ * This driver therefore does what src/jtag/drivers/dmem.c does: it emulates
++ * a MEM-AP in software on top of a raw memory-access primitive, and presents
++ * that to OpenOCD as a dapdirect_swd adapter.  The primitive here is the ADP
++ * byte stream rather than mmap()ed /dev/mem.
++ *
++ * The natural OpenOCD target on top of this is "mem_ap".  When the SoC's
++ * nanosoc_dbg_ahb_bridge is respun to alias the PPB into a reachable window,
++ * "cortex_m" becomes possible with no change to this driver beyond turning on
++ * the hostio4_ppb_base translation hook (see hostio4_xlat()).
++ */
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <poll.h>
++#include <termios.h>
++
++#ifndef _WIN32
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <netdb.h>
++#include <netinet/in.h>
++#include <netinet/tcp.h>
++#endif
++
++#include <helper/system.h>
++#include <helper/replacements.h>
++#include <helper/types.h>
++#include <helper/time_support.h>
++#include <jtag/interface.h>
++
++#include <target/arm_adi_v5.h>
++#include <target/target.h>
++#include <transport/transport.h>
++
++/* ------------------------------------------------------------------ */
++/* configuration                                                       */
++/* ------------------------------------------------------------------ */
++
++#define HOSTIO4_MAX_APS			8
++#define HOSTIO4_MAX_BLOCK		256
++#define HOSTIO4_DEF_BLOCK		16
++#define HOSTIO4_DEF_TIMEOUT_MS		500
++#define HOSTIO4_MAX_SILENT		3
++
++/*
++ * The die-to-die aperture.  A read or a write in here while the D2D link is
++ * down stalls the AHB bus forever: the ADP monitor has no bus timeout in RTL,
++ * so nothing recovers it short of a chip reset.  The driver refuses it.
++ */
++#define HOSTIO4_D2D_LO			0x2e000000u
++#define HOSTIO4_D2D_HI			0x2fffffffu
++
++/* ASCII protocol constants */
++#define ADP_ESC				0x1b
++#define ADP_PROMPT			']'
++#define ADP_CR				0x0d
++
++static char *hostio4_port;			/* "/dev/ttyUSB0", "/tmp/adp.sock", "host:port" */
++static uint32_t hostio4_base;			/* offset added to TAR before it hits the wire */
++static unsigned int hostio4_blocksize = HOSTIO4_DEF_BLOCK;
++static unsigned int hostio4_timeout_ms = HOSTIO4_DEF_TIMEOUT_MS;
++static bool hostio4_block_write;		/* 'U' block upload; opt-in, see hazard note */
++
++/* Forward-compatibility hook, see hostio4_xlat().  Disabled by default. */
++static bool hostio4_ppb_en[HOSTIO4_MAX_APS];
++static uint32_t hostio4_ppb_base[HOSTIO4_MAX_APS];
++
++/* ------------------------------------------------------------------ */
++/* link state                                                          */
++/* ------------------------------------------------------------------ */
++
++static int hostio4_fd = -1;
++static bool hostio4_link_dead;
++static unsigned int hostio4_silent_cmds;
++
++/* sticky DAP error, drained by hostio4_dp_run() -- same contract as dmem.c */
++static int hostio4_dap_retval = ERROR_OK;
++
++/* what we believe the monitor's own address pointer is */
++static bool hostio4_mon_addr_valid;
++static uint32_t hostio4_mon_addr;
++
++/* emulated MEM-AP state, one per AP */
++struct hostio4_ap_state {
++	uint32_t csw;
++	uint32_t tar;
++};
++static struct hostio4_ap_state hostio4_ap[HOSTIO4_MAX_APS];
++
++/* deferred DRW traffic, so that a run of words becomes one block command */
++enum hostio4_pend_kind {
++	PEND_NONE = 0,
++	PEND_READ,
++	PEND_WRITE,
++};
++static enum hostio4_pend_kind hostio4_pend_kind;
++static uint32_t hostio4_pend_addr;		/* wire address of the first pending word */
++static unsigned int hostio4_pend_count;
++static uint32_t *hostio4_pend_dest[HOSTIO4_MAX_BLOCK];
++static uint32_t hostio4_pend_data[HOSTIO4_MAX_BLOCK];
++
++/* stats, so that a caller can prove which wire form was used */
++static unsigned int hostio4_stat_block_reads;
++static unsigned int hostio4_stat_single_reads;
++static unsigned int hostio4_stat_writes;
++static unsigned int hostio4_stat_block_writes;
++static unsigned int hostio4_stat_faults;
++
++/* ------------------------------------------------------------------ */
++/* byte stream                                                         */
++/* ------------------------------------------------------------------ */
++
++static uint8_t hostio4_rx[1024];
++static size_t hostio4_rx_len;
++static size_t hostio4_rx_pos;
++
++static void hostio4_rx_reset(void)
++{
++	hostio4_rx_len = 0;
++	hostio4_rx_pos = 0;
++}
++
++/* returns 1 on a byte, 0 on timeout, negative on a hard error */
++static int hostio4_getc(uint8_t *out, int64_t deadline_ms)
++{
++	if (hostio4_rx_pos < hostio4_rx_len) {
++		*out = hostio4_rx[hostio4_rx_pos++];
++		return 1;
++	}
++
++	for (;;) {
++		int64_t left = deadline_ms - timeval_ms();
++
++		if (left < 0)
++			left = 0;
++		if (left > hostio4_timeout_ms)
++			left = hostio4_timeout_ms;
++
++		struct pollfd pfd = { .fd = hostio4_fd, .events = POLLIN };
++		int rc = poll(&pfd, 1, (int)left);
++
++		if (rc < 0) {
++			if (errno == EINTR)
++				continue;
++			LOG_ERROR("hostio4: poll: %s", strerror(errno));
++			return ERROR_FAIL;
++		}
++		if (rc == 0)
++			return 0;			/* timeout */
++
++		ssize_t n = read(hostio4_fd, hostio4_rx, sizeof(hostio4_rx));
++
++		if (n < 0) {
++			if (errno == EINTR || errno == EAGAIN)
++				continue;
++			LOG_ERROR("hostio4: read: %s", strerror(errno));
++			return ERROR_FAIL;
++		}
++		if (n == 0) {
++			LOG_ERROR("hostio4: link closed by the far end");
++			return ERROR_FAIL;
++		}
++
++		hostio4_rx_len = (size_t)n;
++		hostio4_rx_pos = 1;
++		*out = hostio4_rx[0];
++		return 1;
++	}
++}
++
++static int hostio4_write_all(const void *buf, size_t len)
++{
++	const uint8_t *p = buf;
++	size_t done = 0;
++
++	while (done < len) {
++		ssize_t n = write(hostio4_fd, p + done, len - done);
++
++		if (n < 0) {
++			if (errno == EINTR || errno == EAGAIN)
++				continue;
++			LOG_ERROR("hostio4: write: %s", strerror(errno));
++			return ERROR_FAIL;
++		}
++		done += (size_t)n;
++	}
++	return ERROR_OK;
++}
++
++/*
++ * Swallow whatever the far end still owes us, until it goes quiet -- but never
++ * for longer than HOSTIO4_DRAIN_MAX_MS in total. The quiet window is re-armed
++ * on every byte, so a far end that never pauses for @quiet_ms (a program
++ * printf()ing on the shared console) would otherwise keep OpenOCD here for
++ * ever, deaf to SIGTERM (its handler only sets a flag this loop never reads).
++ */
++#define HOSTIO4_DRAIN_MAX_MS		2000
++
++static void hostio4_drain(unsigned int quiet_ms)
++{
++	int64_t hard = timeval_ms() + HOSTIO4_DRAIN_MAX_MS;
++	int64_t deadline = timeval_ms() + quiet_ms;
++	uint8_t c;
++
++	hostio4_rx_reset();
++	while (hostio4_getc(&c, deadline) == 1) {
++		if (timeval_ms() >= hard) {
++			LOG_WARNING("hostio4: the far end never went quiet for %u ms in %d ms "
++				    "(something is printing on the console?); continuing",
++				    quiet_ms, HOSTIO4_DRAIN_MAX_MS);
++			hostio4_rx_reset();
++			return;
++		}
++		deadline = timeval_ms() + quiet_ms;
++	}
++}
++
++/* ------------------------------------------------------------------ */
++/* reply parser                                                        */
++/* ------------------------------------------------------------------ */
++
++/*
++ * A reply is  <LETTER><FLAG>0x<hexdigits>  then LF then CR (0x0a 0x0d, in
++ * that order -- not CRLF), and the prompt ']' comes after the LAST reply of a
++ * command.  So the framing is counted in prompts, never in line terminators.
++ *
++ * The state machine below also tolerates a monitor that echoes the command
++ * characters: an echoed "R00000008" starts as a reply ('R') but fails at the
++ * flag position and is discarded.
++ */
++
++struct hostio4_reply {
++	char letter;
++	bool fault;		/* the '!' flag: the AHB transfer took an error response */
++	uint32_t value;
++};
++
++enum hostio4_parse_state {
++	PS_IDLE = 0,
++	PS_FLAG,
++	PS_ZERO,
++	PS_EX,
++	PS_DIGITS,
++};
++
++/*
++ * Send @out, then read until @want_prompts prompt characters have arrived.
++ * Replies are appended to @replies (at most @max_replies of them; the OLDEST
++ * are dropped on overflow, because for a pipelined "Ax...;R<n>" the ones that
++ * matter are the last n).
++ *
++ * @want_letter, when non-zero, is the only reply letter that is stored or
++ * COUNTED. Without it the "A 0x<addr>" reply to a pipelined "Ax" counts as a
++ * data word: a block read that loses one "R" line in transit then still
++ * reports @count replies, and the caller hands back the ADDRESS as word 0 and
++ * every other word shifted by one -- with no error.
++ */
++static int hostio4_exchange(const char *out, size_t out_len,
++			    unsigned int want_prompts,
++			    struct hostio4_reply *replies,
++			    unsigned int max_replies,
++			    unsigned int *n_replies,
++			    char want_letter)
++{
++	if (hostio4_link_dead)
++		return ERROR_FAIL;
++
++	if (n_replies)
++		*n_replies = 0;
++
++	if (out_len) {
++		LOG_DEBUG_IO("hostio4 tx: %.*s", (int)out_len, out);
++		if (hostio4_write_all(out, out_len) != ERROR_OK) {
++			hostio4_link_dead = true;
++			return ERROR_FAIL;
++		}
++	}
++
++	unsigned int got_prompts = 0;
++	unsigned int got_replies = 0;
++	enum hostio4_parse_state st = PS_IDLE;
++	struct hostio4_reply cur = { 0 };
++	unsigned int ndigits = 0;
++	/* generous: one per-command budget for each pipelined command */
++	int64_t deadline = timeval_ms() + (int64_t)hostio4_timeout_ms * (want_prompts ? want_prompts : 1);
++
++	while (got_prompts < want_prompts) {
++		uint8_t c;
++		/* the deadline is absolute: bytes that keep arriving without a
++		 * prompt must not extend it */
++		int rc = timeval_ms() > deadline ? 0 : hostio4_getc(&c, deadline);
++
++		if (rc < 0) {
++			hostio4_link_dead = true;
++			return ERROR_FAIL;
++		}
++		if (rc == 0) {
++			hostio4_silent_cmds++;
++			LOG_ERROR("hostio4: timeout after %u ms waiting for prompt %u/%u (%u silent in a row)",
++				  hostio4_timeout_ms, got_prompts + 1, want_prompts, hostio4_silent_cmds);
++			hostio4_mon_addr_valid = false;
++			if (hostio4_silent_cmds >= HOSTIO4_MAX_SILENT) {
++				LOG_ERROR("hostio4: %u consecutive silent commands, giving up on the link",
++					  hostio4_silent_cmds);
++				hostio4_link_dead = true;
++			}
++			return ERROR_FAIL;
++		}
++
++reparse:
++		switch (st) {
++		case PS_IDLE:
++			if (c == ADP_PROMPT) {
++				got_prompts++;
++			} else if (c >= 'A' && c <= 'Z') {
++				cur.letter = (char)c;
++				cur.fault = false;
++				cur.value = 0;
++				ndigits = 0;
++				st = PS_FLAG;
++			}
++			break;
++
++		case PS_FLAG:
++			if (c == ' ' || c == '!') {
++				cur.fault = (c == '!');
++				st = PS_ZERO;
++			} else {
++				st = PS_IDLE;
++				goto reparse;
++			}
++			break;
++
++		case PS_ZERO:
++			if (c == '0') {
++				st = PS_EX;
++			} else {
++				st = PS_IDLE;
++				goto reparse;
++			}
++			break;
++
++		case PS_EX:
++			if (c == 'x' || c == 'X') {
++				st = PS_DIGITS;
++			} else {
++				st = PS_IDLE;
++				goto reparse;
++			}
++			break;
++
++		case PS_DIGITS:
++			if (isxdigit(c)) {
++				unsigned int d;
++
++				if (c >= '0' && c <= '9')
++					d = c - '0';
++				else if (c >= 'a' && c <= 'f')
++					d = c - 'a' + 10;
++				else
++					d = c - 'A' + 10;
++				cur.value = (cur.value << 4) | d;
++				ndigits++;
++				break;
++			}
++			st = PS_IDLE;
++			/* 1..8 digits is a 32-bit word; more is a garbled line */
++			if (ndigits && ndigits <= 8 &&
++			    (!want_letter || cur.letter == want_letter)) {
++				if (replies && max_replies) {
++					if (got_replies < max_replies) {
++						replies[got_replies] = cur;
++					} else {
++						memmove(&replies[0], &replies[1],
++							(max_replies - 1) * sizeof(replies[0]));
++						replies[max_replies - 1] = cur;
++					}
++				}
++				got_replies++;
++			}
++			goto reparse;
++		}
++	}
++
++	hostio4_silent_cmds = 0;
++	if (n_replies)
++		*n_replies = got_replies;
++	return ERROR_OK;
++}
++
++/* ------------------------------------------------------------------ */
++/* address translation                                                 */
++/* ------------------------------------------------------------------ */
++
++/*
++ * Forward-compatibility hook.  nanosoc_dbg_ahb_bridge rewrites the top byte of
++ * a 0xE0xxxxxx access to a configured base so that the Cortex-M PPB becomes
++ * reachable from the debug AHB master.  Mirror that here, so that a later RTL
++ * change is driven by "cortex_m" with no further driver work.  Off by default.
++ */
++static uint32_t hostio4_ppb_xlat(unsigned int ap_idx, uint32_t addr)
++{
++	if (hostio4_ppb_en[ap_idx] && (addr & 0xff000000u) == 0xe0000000u)
++		return (addr & 0x00ffffffu) | (hostio4_ppb_base[ap_idx] & 0xff000000u);
++	return addr;
++}
++
++static uint32_t hostio4_xlat(unsigned int ap_idx, uint32_t tar)
++{
++	return hostio4_ppb_xlat(ap_idx, tar) + hostio4_base;
++}
++
++/* refuse anything that touches the D2D window: it wedges the AHB for good */
++static int hostio4_check_span(uint32_t addr, unsigned int words)
++{
++	uint64_t lo = addr;
++	uint64_t hi = (uint64_t)addr + (uint64_t)words * 4 - 1;
++
++	if (hi >= HOSTIO4_D2D_LO && lo <= HOSTIO4_D2D_HI) {
++		LOG_ERROR("hostio4: refusing access to 0x%08" PRIx32 "..0x%08" PRIx64
++			  ": it overlaps the die-to-die window 0x%08x-0x%08x. "
++			  "The ADP monitor has no bus timeout, so an access there with the "
++			  "D2D link down stalls the AHB until the chip is reset.",
++			  addr, hi, HOSTIO4_D2D_LO, HOSTIO4_D2D_HI);
++		return ERROR_FAIL;
++	}
++	return ERROR_OK;
++}
++
++/* ------------------------------------------------------------------ */
++/* ADP primitives                                                      */
++/* ------------------------------------------------------------------ */
++
++/*
++ * Always emit exactly 8 hex digits after "Ax".  The monitor decides the access
++ * size from the DIGIT COUNT: 1-2 -> 8 bit, 3-4 -> 16 bit, 5+ -> 32 bit.  So
++ * "Ax1000" would silently switch the port to 16-bit accesses.
++ */
++static size_t hostio4_emit_addr(char *buf, uint32_t addr)
++{
++	return (size_t)sprintf(buf, "Ax%08" PRIX32 "\r", addr);
++}
++
++/* one 32-bit read at @addr; block form when @count > 1 */
++static int hostio4_do_read(uint32_t addr, unsigned int count, uint32_t *out, bool *any_fault)
++{
++	char cmd[64];
++	size_t len = 0;
++	unsigned int prompts = 0;
++	struct hostio4_reply rep[HOSTIO4_MAX_BLOCK];
++	unsigned int nrep = 0;
++
++	if (count == 0)
++		return ERROR_OK;
++	if (count > HOSTIO4_MAX_BLOCK)
++		return ERROR_FAIL;
++	if (hostio4_check_span(addr, count) != ERROR_OK)
++		return ERROR_FAIL;
++
++	if (!hostio4_mon_addr_valid || hostio4_mon_addr != addr) {
++		len += hostio4_emit_addr(cmd + len, addr);
++		prompts++;
++	}
++
++	if (count == 1) {
++		len += (size_t)sprintf(cmd + len, "R\r");
++		hostio4_stat_single_reads++;
++	} else {
++		len += (size_t)sprintf(cmd + len, "R%08X\r", count);
++		hostio4_stat_block_reads++;
++	}
++	prompts++;
++
++	int retval = hostio4_exchange(cmd, len, prompts, rep, count, &nrep, 'R');
++
++	if (retval != ERROR_OK) {
++		hostio4_mon_addr_valid = false;
++		return retval;
++	}
++
++	if (nrep < count) {
++		LOG_ERROR("hostio4: short reply: wanted %u words at 0x%08" PRIx32 ", got %u",
++			  count, addr, nrep);
++		hostio4_mon_addr_valid = false;
++		return ERROR_FAIL;
++	}
++
++	/*
++	 * hostio4_exchange() counted and kept 'R' replies only, so the "A" reply
++	 * to a pipelined "Ax" can never stand in for a lost data word.
++	 */
++	for (unsigned int i = 0; i < count; i++) {
++		out[i] = rep[i].value;
++		if (rep[i].fault) {
++			*any_fault = true;
++			hostio4_stat_faults++;
++			/*
++			 * LOG_ERROR, not LOG_DEBUG: this IS the error, and it is
++			 * the only place the EXACT faulting address is known.
++			 * OpenOCD's own "Failed to read memory at ..." is emitted
++			 * after the queue drains, by which point TAR has already
++			 * auto-incremented, so it names the NEXT word. Someone
++			 * mapping an aperture boundary from that message alone
++			 * walks off by one.
++			 */
++			LOG_ERROR("hostio4: AHB bus error reading 0x%08" PRIx32
++				  " (the monitor flagged '!'); OpenOCD may report "
++				  "the following word instead", addr + 4 * i);
++		}
++	}
++
++	/*
++	 * The pointer auto-increments even on an errored transfer: there is no
++	 * HRESP term in the increment condition in RTL.  So the pointer is where
++	 * we expect it whether or not the words came back flagged.
++	 */
++	hostio4_mon_addr = addr + 4 * count;
++	hostio4_mon_addr_valid = true;
++	return ERROR_OK;
++}
++
++/* one 32-bit write at @addr */
++static int hostio4_do_write_word(uint32_t addr, uint32_t data, bool *any_fault)
++{
++	char cmd[64];
++	size_t len = 0;
++	unsigned int prompts = 0;
++	struct hostio4_reply rep[1];
++	unsigned int nrep = 0;
++
++	if (hostio4_check_span(addr, 1) != ERROR_OK)
++		return ERROR_FAIL;
++
++	if (!hostio4_mon_addr_valid || hostio4_mon_addr != addr) {
++		len += hostio4_emit_addr(cmd + len, addr);
++		prompts++;
++	}
++	len += (size_t)sprintf(cmd + len, "Wx%08" PRIX32 "\r", data);
++	prompts++;
++	hostio4_stat_writes++;
++
++	int retval = hostio4_exchange(cmd, len, prompts, rep, 1, &nrep, 'W');
++
++	if (retval != ERROR_OK) {
++		hostio4_mon_addr_valid = false;
++		return retval;
++	}
++	if (nrep >= 1 && rep[0].fault) {
++		*any_fault = true;
++		hostio4_stat_faults++;
++		LOG_ERROR("hostio4: AHB bus error writing 0x%08" PRIx32
++			  " (the monitor flagged '!')", addr);
++	}
++
++	hostio4_mon_addr = addr + 4;
++	hostio4_mon_addr_valid = true;
++	return ERROR_OK;
++}
++
++/*
++ * Block upload.  HAZARD: inside the upload read state the monitor treats
++ * 0x04/0x00/0x1b as payload, not as escapes, so a short payload parks it
++ * forever with no way back but a reset.  The payload is therefore built in
++ * full before a single byte is sent, and if the stream write cannot complete
++ * the link is declared dead rather than left half-fed.
++ *
++ * "Ux0" and "Ux1" consume no payload at all, so they are never emitted: the
++ * caller falls back to Wx for count < 2.
++ */
++static int hostio4_do_block_write(uint32_t addr, const uint32_t *data, unsigned int count)
++{
++	uint8_t buf[64 + 4 * HOSTIO4_MAX_BLOCK];
++	size_t len = 0;
++	unsigned int prompts = 0;
++	unsigned int nbytes = count * 4;
++
++	if (count < 2 || count > HOSTIO4_MAX_BLOCK)
++		return ERROR_FAIL;
++	if (hostio4_check_span(addr, count) != ERROR_OK)
++		return ERROR_FAIL;
++
++	if (!hostio4_mon_addr_valid || hostio4_mon_addr != addr) {
++		len += hostio4_emit_addr((char *)buf + len, addr);
++		prompts++;
++	}
++	len += (size_t)sprintf((char *)buf + len, "Ux%08X\r", nbytes);
++	prompts++;
++
++	/* little-endian: the monitor does one byte-sized AHB write per payload byte */
++	for (unsigned int i = 0; i < count; i++) {
++		buf[len++] = (uint8_t)(data[i] >> 0);
++		buf[len++] = (uint8_t)(data[i] >> 8);
++		buf[len++] = (uint8_t)(data[i] >> 16);
++		buf[len++] = (uint8_t)(data[i] >> 24);
++	}
++
++	hostio4_stat_block_writes++;
++
++	int retval = hostio4_exchange((const char *)buf, len, prompts, NULL, 0, NULL, 0);
++
++	if (retval != ERROR_OK) {
++		hostio4_mon_addr_valid = false;
++		return retval;
++	}
++
++	hostio4_mon_addr = addr + nbytes;
++	hostio4_mon_addr_valid = true;
++	return ERROR_OK;
++}
++
++/* ------------------------------------------------------------------ */
++/* deferred DRW batching                                               */
++/* ------------------------------------------------------------------ */
++
++/*
++ * The bench transport rewrites three byte values, byte by byte, with no notion
++ * of a 'U' payload (HAPS-work fpga/haps-sx/hostio/adp-bridge to_board(), and
++ * haps-hostio's console loop, `if ch == "]": send("\x1b")`):
++ *   0x03  adp-bridge deletes it (Ctrl-C): the payload arrives one byte short
++ *         and the monitor parks for good;
++ *   0x5d  the dongle's console bridge turns ']' into ESC: silent corruption;
++ *   0x1b  adp-bridge turns ESC into ']' (the dongle turns it back): silent
++ *         corruption on any path that lacks the dongle's half.
++ * A block whose payload carries any of them goes as ASCII Wx words instead --
++ * slower, and the only form those bytes survive.
++ */
++static bool hostio4_payload_mangled(const uint32_t *data, unsigned int count)
++{
++	for (unsigned int i = 0; i < count; i++)
++		for (unsigned int b = 0; b < 32; b += 8) {
++			uint8_t v = (uint8_t)(data[i] >> b);
++
++			if (v == 0x03 || v == ADP_ESC || v == ADP_PROMPT)
++				return true;
++		}
++	return false;
++}
++
++static int hostio4_flush_pending(void)
++{
++	enum hostio4_pend_kind kind = hostio4_pend_kind;
++	unsigned int count = hostio4_pend_count;
++	uint32_t addr = hostio4_pend_addr;
++	bool fault = false;
++	int retval = ERROR_OK;
++
++	hostio4_pend_kind = PEND_NONE;
++	hostio4_pend_count = 0;
++
++	if (kind == PEND_NONE || count == 0)
++		return ERROR_OK;
++
++	if (kind == PEND_READ) {
++		uint32_t vals[HOSTIO4_MAX_BLOCK];
++
++		retval = hostio4_do_read(addr, count, vals, &fault);
++		if (retval == ERROR_OK) {
++			for (unsigned int i = 0; i < count; i++)
++				if (hostio4_pend_dest[i])
++					*hostio4_pend_dest[i] = vals[i];
++		}
++	} else {
++		if (hostio4_block_write && count >= 2 &&
++		    !hostio4_payload_mangled(hostio4_pend_data, count)) {
++			retval = hostio4_do_block_write(addr, hostio4_pend_data, count);
++		} else {
++			for (unsigned int i = 0; i < count && retval == ERROR_OK; i++)
++				retval = hostio4_do_write_word(addr + 4 * i,
++							       hostio4_pend_data[i], &fault);
++		}
++	}
++
++	if (retval != ERROR_OK)
++		hostio4_dap_retval = retval;
++	else if (fault)
++		hostio4_dap_retval = ERROR_TARGET_DATA_ABORT;
++
++	return retval;
++}
++
++/* bytes per DRW transfer: 1, 2 or 4 (anything wider is treated as 4) */
++static uint32_t hostio4_csw_bytes(uint32_t csw)
++{
++	switch (csw & CSW_SIZE_MASK) {
++	case CSW_8BIT:
++		return 1;
++	case CSW_16BIT:
++		return 2;
++	default:
++		return 4;
++	}
++}
++
++static uint32_t hostio4_tar_inc(uint32_t csw)
++{
++	if ((csw & CSW_ADDRINC_MASK) != 0)
++		return hostio4_csw_bytes(csw);
++	return 0;
++}
++
++/*
++ * One 8- or 16-bit DRW transfer. The monitor has no sub-word access at any
++ * address above 0xff (its access size is the DIGIT COUNT of "Ax", and the
++ * driver always sends eight), so the containing word is read and, for a
++ * write, merged and written back. A read hands OpenOCD the whole word: per
++ * ADI, a sub-word DRW value carries its bytes in their byte lanes, and
++ * mem_ap_read() extracts the lane itself.
++ *
++ * The RMW is not atomic on the bus. That is the price of not zeroing the
++ * three neighbouring bytes, which is what writing the DRW value as a word did.
++ */
++static int hostio4_subword(enum hostio4_pend_kind kind, unsigned int ap_idx,
++			   uint32_t *dest, uint32_t data)
++{
++	struct hostio4_ap_state *st = &hostio4_ap[ap_idx];
++	uint32_t bytes = hostio4_csw_bytes(st->csw);
++	uint32_t lane = st->tar & 3;
++	uint32_t wire = hostio4_xlat(ap_idx, st->tar) & ~3u;
++	uint32_t word = 0, mask;
++	bool fault = false;
++	int retval = hostio4_flush_pending();
++
++	if (retval != ERROR_OK)
++		return retval;
++	if (lane + bytes > 4) {
++		LOG_ERROR("hostio4: a %u-byte access at 0x%08" PRIx32 " crosses a word",
++			  bytes, st->tar);
++		hostio4_dap_retval = ERROR_TARGET_UNALIGNED_ACCESS;
++		return ERROR_TARGET_UNALIGNED_ACCESS;
++	}
++	retval = hostio4_do_read(wire, 1, &word, &fault);
++	if (retval == ERROR_OK && kind == PEND_READ) {
++		if (dest)
++			*dest = word;
++	} else if (retval == ERROR_OK && !fault) {
++		mask = (bytes == 1 ? 0xffu : 0xffffu) << (8 * lane);
++		retval = hostio4_do_write_word(wire, (word & ~mask) | (data & mask), &fault);
++	}
++	if (retval != ERROR_OK)
++		hostio4_dap_retval = retval;
++	else if (fault)
++		hostio4_dap_retval = ERROR_TARGET_DATA_ABORT;
++	st->tar += hostio4_tar_inc(st->csw);
++	return retval;
++}
++
++static int hostio4_queue_drw(enum hostio4_pend_kind kind, unsigned int ap_idx,
++			     uint32_t *dest, uint32_t data)
++{
++	struct hostio4_ap_state *st = &hostio4_ap[ap_idx];
++	uint32_t wire = hostio4_xlat(ap_idx, st->tar);
++	unsigned int limit = hostio4_blocksize;
++
++	if (limit < 1)
++		limit = 1;
++	if (limit > HOSTIO4_MAX_BLOCK)
++		limit = HOSTIO4_MAX_BLOCK;
++
++	/* refuse before anything is queued, so the error names the real address */
++	if (hostio4_check_span(wire & ~3u, 1) != ERROR_OK) {
++		hostio4_dap_retval = ERROR_FAIL;
++		return ERROR_FAIL;
++	}
++
++	if (hostio4_csw_bytes(st->csw) != 4)
++		return hostio4_subword(kind, ap_idx, dest, data);
++	wire &= ~3u;
++
++	bool contiguous = (hostio4_pend_kind == kind) &&
++			  (hostio4_pend_count > 0) &&
++			  (hostio4_pend_count < limit) &&
++			  (hostio4_pend_addr + 4 * hostio4_pend_count == wire);
++
++	if (!contiguous) {
++		int retval = hostio4_flush_pending();
++
++		if (retval != ERROR_OK)
++			return retval;
++		hostio4_pend_kind = kind;
++		hostio4_pend_addr = wire;
++		hostio4_pend_count = 0;
++	}
++
++	hostio4_pend_dest[hostio4_pend_count] = dest;
++	hostio4_pend_data[hostio4_pend_count] = data;
++	hostio4_pend_count++;
++
++	st->tar += hostio4_tar_inc(st->csw);
++	return ERROR_OK;
++}
++
++/* ------------------------------------------------------------------ */
++/* emulated MEM-AP                                                     */
++/* ------------------------------------------------------------------ */
++
++static int hostio4_emu_ap_q_read(unsigned int ap_idx, unsigned int reg, uint32_t *data)
++{
++	struct hostio4_ap_state *st = &hostio4_ap[ap_idx];
++	int ret = ERROR_OK;
++	bool fault = false;
++	uint32_t addr;
++
++	switch (reg) {
++	case ADIV5_MEM_AP_REG_CSW:
++		ret = hostio4_flush_pending();
++		*data = st->csw;
++		break;
++	case ADIV5_MEM_AP_REG_TAR:
++		ret = hostio4_flush_pending();
++		*data = st->tar;
++		break;
++	case ADIV5_MEM_AP_REG_TAR64:
++	case ADIV5_MEM_AP_REG_CFG:
++	case ADIV5_MEM_AP_REG_BASE:
++	case ADIV5_MEM_AP_REG_BASE64:
++	case ADIV5_AP_REG_IDR:
++		*data = 0;
++		break;
++	case ADIV5_MEM_AP_REG_BD0:
++	case ADIV5_MEM_AP_REG_BD1:
++	case ADIV5_MEM_AP_REG_BD2:
++	case ADIV5_MEM_AP_REG_BD3:
++		ret = hostio4_flush_pending();
++		if (ret != ERROR_OK)
++			break;
++		addr = hostio4_xlat(ap_idx, (st->tar & ~0xfu) + (reg & 0x0c));
++		ret = hostio4_do_read(addr, 1, data, &fault);
++		break;
++	case ADIV5_MEM_AP_REG_DRW:
++		return hostio4_queue_drw(PEND_READ, ap_idx, data, 0);
++	default:
++		LOG_INFO("%s: unknown reg: 0x%02x", __func__, reg);
++		ret = ERROR_FAIL;
++		break;
++	}
++
++	if (ret != ERROR_OK)
++		hostio4_dap_retval = ret;
++	else if (fault)
++		hostio4_dap_retval = ERROR_TARGET_DATA_ABORT;
++
++	return ret;
++}
++
++static int hostio4_emu_ap_q_write(unsigned int ap_idx, unsigned int reg, uint32_t data)
++{
++	struct hostio4_ap_state *st = &hostio4_ap[ap_idx];
++	int ret = ERROR_OK;
++	bool fault = false;
++	uint32_t addr;
++
++	switch (reg) {
++	case ADIV5_MEM_AP_REG_CSW:
++		ret = hostio4_flush_pending();
++		/*
++		 * Keep the SIZE OpenOCD asked for: forcing it to 32 bits made a
++		 * byte write a word write (three neighbouring bytes zeroed) and
++		 * stepped TAR by 4 while OpenOCD's cache stepped it by 1, so the
++		 * next byte landed in the NEXT word. Packed transfers are not
++		 * emulated: report ADDRINC_SINGLE back, and mem_ap_init() then
++		 * leaves ap->packed_transfers false.
++		 */
++		if ((data & CSW_ADDRINC_MASK) == CSW_ADDRINC_PACKED)
++			data = (data & ~(uint32_t)CSW_ADDRINC_MASK) | CSW_ADDRINC_SINGLE;
++		st->csw = data;
++		break;
++	case ADIV5_MEM_AP_REG_TAR:
++		ret = hostio4_flush_pending();
++		st->tar = data;		/* byte-exact; the wire address is masked */
++		break;
++	case ADIV5_MEM_AP_REG_TAR64:
++		if (data) {
++			LOG_ERROR("hostio4: 64-bit TAR is not supported (TAR64=0x%08" PRIx32 ")", data);
++			ret = ERROR_FAIL;
++		}
++		break;
++	case ADIV5_MEM_AP_REG_CFG:
++	case ADIV5_MEM_AP_REG_BASE:
++	case ADIV5_MEM_AP_REG_BASE64:
++	case ADIV5_AP_REG_IDR:
++		break;
++	case ADIV5_MEM_AP_REG_BD0:
++	case ADIV5_MEM_AP_REG_BD1:
++	case ADIV5_MEM_AP_REG_BD2:
++	case ADIV5_MEM_AP_REG_BD3:
++		ret = hostio4_flush_pending();
++		if (ret != ERROR_OK)
++			break;
++		addr = hostio4_xlat(ap_idx, (st->tar & ~0xfu) + (reg & 0x0c));
++		ret = hostio4_do_write_word(addr, data, &fault);
++		break;
++	case ADIV5_MEM_AP_REG_DRW:
++		return hostio4_queue_drw(PEND_WRITE, ap_idx, NULL, data);
++	default:
++		LOG_INFO("%s: unknown reg: 0x%02x", __func__, reg);
++		ret = ERROR_FAIL;
++		break;
++	}
++
++	if (ret != ERROR_OK)
++		hostio4_dap_retval = ret;
++	else if (fault)
++		hostio4_dap_retval = ERROR_TARGET_DATA_ABORT;
++
++	return ret;
++}
++
++/* ------------------------------------------------------------------ */
++/* dap_ops                                                             */
++/* ------------------------------------------------------------------ */
++
++static int hostio4_dp_q_read(struct adiv5_dap *dap, unsigned int reg, uint32_t *data)
++{
++	if (!data)
++		return ERROR_OK;
++
++	switch (reg) {
++	case DP_CTRL_STAT:
++		*data = CDBGPWRUPACK | CSYSPWRUPACK;
++		break;
++	default:
++		*data = 0;
++		break;
++	}
++	return ERROR_OK;
++}
++
++static int hostio4_dp_q_write(struct adiv5_dap *dap, unsigned int reg, uint32_t data)
++{
++	return ERROR_OK;
++}
++
++static bool hostio4_ap_index(struct adiv5_ap *ap, unsigned int *idx)
++{
++	if (ap->ap_num >= HOSTIO4_MAX_APS) {
++		static bool flagged;
++
++		if (!flagged)
++			LOG_ERROR("hostio4: AP %" PRIu64 " is out of range (max %d)",
++				  ap->ap_num, HOSTIO4_MAX_APS - 1);
++		flagged = true;
++		return false;
++	}
++	*idx = (unsigned int)ap->ap_num;
++	return true;
++}
++
++static int hostio4_ap_q_read(struct adiv5_ap *ap, unsigned int reg, uint32_t *data)
++{
++	unsigned int idx;
++
++	if (is_adiv6(ap->dap)) {
++		static bool flagged;
++
++		if (!flagged)
++			LOG_ERROR("hostio4: ADIv6 is not supported");
++		flagged = true;
++		return ERROR_FAIL;
++	}
++	if (!hostio4_ap_index(ap, &idx))
++		return ERROR_FAIL;
++
++	return hostio4_emu_ap_q_read(idx, reg, data);
++}
++
++static int hostio4_ap_q_write(struct adiv5_ap *ap, unsigned int reg, uint32_t data)
++{
++	unsigned int idx;
++
++	if (is_adiv6(ap->dap)) {
++		static bool flagged;
++
++		if (!flagged)
++			LOG_ERROR("hostio4: ADIv6 is not supported");
++		flagged = true;
++		return ERROR_FAIL;
++	}
++	if (!hostio4_ap_index(ap, &idx))
++		return ERROR_FAIL;
++
++	return hostio4_emu_ap_q_write(idx, reg, data);
++}
++
++static int hostio4_ap_q_abort(struct adiv5_dap *dap, uint8_t *ack)
++{
++	/*
++	 * There is nothing to abort on the wire: the monitor is strictly
++	 * command/response.  Drop whatever was batched but not yet sent.
++	 */
++	hostio4_pend_kind = PEND_NONE;
++	hostio4_pend_count = 0;
++	return ERROR_OK;
++}
++
++static int hostio4_dp_run(struct adiv5_dap *dap)
++{
++	int retval = hostio4_flush_pending();
++
++	if (retval == ERROR_OK)
++		retval = hostio4_dap_retval;
++
++	hostio4_dap_retval = ERROR_OK;
++	return retval;
++}
++
++static int hostio4_connect(struct adiv5_dap *dap)
++{
++	return ERROR_OK;
++}
++
++/* ------------------------------------------------------------------ */
++/* stream setup                                                        */
++/* ------------------------------------------------------------------ */
++
++static int hostio4_open_tcp(const char *spec)
++{
++	struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
++	struct addrinfo *result, *rp;
++	char *host = strdup(spec);
++	char *colon;
++	int fd = -1;
++
++	if (!host)
++		return -1;
++
++	colon = strrchr(host, ':');
++	*colon = '\0';
++
++	LOG_INFO("hostio4: connecting to tcp %s:%s", host, colon + 1);
++
++	int s = getaddrinfo(host[0] ? host : NULL, colon + 1, &hints, &result);
++
++	if (s != 0) {
++		LOG_ERROR("hostio4: getaddrinfo: %s", gai_strerror(s));
++		free(host);
++		return -1;
++	}
++
++	for (rp = result; rp; rp = rp->ai_next) {
++		fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
++		if (fd == -1)
++			continue;
++		if (connect(fd, rp->ai_addr, rp->ai_addrlen) != -1)
++			break;
++		close(fd);
++		fd = -1;
++	}
++	freeaddrinfo(result);
++	free(host);
++
++	if (fd >= 0) {
++		int one = 1;
++
++		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one));
++	}
++	return fd;
++}
++
++static int hostio4_open_unix(const char *path)
++{
++	struct sockaddr_un addr;
++	int fd = socket(PF_UNIX, SOCK_STREAM, 0);
++
++	if (fd < 0) {
++		LOG_ERROR("hostio4: socket: %s", strerror(errno));
++		return -1;
++	}
++
++	memset(&addr, 0, sizeof(addr));
++	addr.sun_family = AF_UNIX;
++	strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
++
++	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
++		LOG_ERROR("hostio4: connect %s: %s", path, strerror(errno));
++		close(fd);
++		return -1;
++	}
++	LOG_INFO("hostio4: connected to unix socket %s", path);
++	return fd;
++}
++
++static int hostio4_open_chardev(const char *path)
++{
++	int fd = open(path, O_RDWR | O_NOCTTY);
++
++	if (fd < 0) {
++		LOG_ERROR("hostio4: open %s: %s", path, strerror(errno));
++		return -1;
++	}
++
++	if (isatty(fd)) {
++		struct termios tio;
++
++		if (tcgetattr(fd, &tio) == 0) {
++			cfmakeraw(&tio);
++			tio.c_cc[VMIN] = 0;
++			tio.c_cc[VTIME] = 0;
++			if (tcsetattr(fd, TCSANOW, &tio) != 0)
++				LOG_WARNING("hostio4: tcsetattr on %s failed: %s",
++					    path, strerror(errno));
++		}
++		LOG_INFO("hostio4: opened tty %s in raw mode", path);
++	} else {
++		LOG_INFO("hostio4: opened %s", path);
++	}
++	return fd;
++}
++
++static int hostio4_open_stream(void)
++{
++	struct stat sb;
++	const char *colon = strrchr(hostio4_port, ':');
++
++	/* "host:port" -- a colon with a decimal tail and no such file on disk */
++	if (colon && colon[1] && strspn(colon + 1, "0123456789") == strlen(colon + 1)
++	    && stat(hostio4_port, &sb) != 0)
++		return hostio4_open_tcp(hostio4_port);
++
++	if (stat(hostio4_port, &sb) == 0 && S_ISSOCK(sb.st_mode))
++		return hostio4_open_unix(hostio4_port);
++
++	return hostio4_open_chardev(hostio4_port);
++}
++
++/*
++ * Enter ADP mode.  ESC switches the monitor in.  The FIRST command after that
++ * may be swallowed and answered '?' if the monitor was already in command
++ * mode, so a benign throwaway goes first and its answer is discarded.
++ * "Ax00000000" is safe: it only moves the address pointer, it does not touch
++ * the AHB bus.
++ */
++static int hostio4_enter_adp(void)
++{
++	static const uint8_t esc = ADP_ESC;
++	char cmd[32];
++	size_t len;
++
++	hostio4_drain(150);
++
++	if (hostio4_write_all(&esc, 1) != ERROR_OK)
++		return ERROR_FAIL;
++
++	len = hostio4_emit_addr(cmd, 0);
++
++	/* throwaway: may be eaten, may come back '?', we do not care */
++	(void)hostio4_exchange(cmd, len, 1, NULL, 0, NULL, 0);
++	hostio4_link_dead = false;
++	hostio4_silent_cmds = 0;
++	hostio4_drain(50);
++
++	/* now a command we actually require an answer to */
++	if (hostio4_exchange(cmd, len, 1, NULL, 0, NULL, 0) != ERROR_OK) {
++		LOG_ERROR("hostio4: no prompt from the ADP monitor on %s -- "
++			  "is the far end up and in command mode?", hostio4_port);
++		return ERROR_FAIL;
++	}
++
++	hostio4_mon_addr = 0;
++	hostio4_mon_addr_valid = true;
++	LOG_INFO("hostio4: ADP monitor is responding on %s", hostio4_port);
++	return ERROR_OK;
++}
++
++static int hostio4_init(void)
++{
++	if (!hostio4_port) {
++		LOG_ERROR("hostio4: no port set; use 'hostio4_port <path|host:port>'");
++		return ERROR_FAIL;
++	}
++
++	hostio4_fd = hostio4_open_stream();
++	if (hostio4_fd < 0)
++		return ERROR_FAIL;
++
++	hostio4_link_dead = false;
++	hostio4_silent_cmds = 0;
++	hostio4_dap_retval = ERROR_OK;
++	hostio4_pend_kind = PEND_NONE;
++	hostio4_pend_count = 0;
++	hostio4_rx_reset();
++
++	for (unsigned int i = 0; i < HOSTIO4_MAX_APS; i++) {
++		hostio4_ap[i].csw = CSW_32BIT;
++		hostio4_ap[i].tar = 0;
++	}
++
++	if (hostio4_enter_adp() != ERROR_OK) {
++		close(hostio4_fd);
++		hostio4_fd = -1;
++		return ERROR_FAIL;
++	}
++	return ERROR_OK;
++}
++
++static int hostio4_quit(void)
++{
++	if (hostio4_fd < 0)
++		return ERROR_OK;
++
++	if (!hostio4_link_dead) {
++		static const char leave[] = "X\r";
++
++		/* best effort: leave ADP mode so the monitor is usable again */
++		(void)hostio4_write_all(leave, sizeof(leave) - 1);
++		hostio4_drain(100);
++	}
++
++	close(hostio4_fd);
++	hostio4_fd = -1;
++	return ERROR_OK;
++}
++
++static int hostio4_reset(int req_trst, int req_srst)
++{
++	/* The ADP monitor has no reset line of its own. */
++	return ERROR_OK;
++}
++
++static int hostio4_speed(int speed)
++{
++	return ERROR_OK;
++}
++
++static int hostio4_khz(int khz, int *jtag_speed)
++{
++	*jtag_speed = khz;
++	return ERROR_OK;
++}
++
++static int hostio4_speed_div(int speed, int *khz)
++{
++	*khz = speed;
++	return ERROR_OK;
++}
++
++/* ------------------------------------------------------------------ */
++/* commands                                                            */
++/* ------------------------------------------------------------------ */
++
++COMMAND_HANDLER(hostio4_handle_port)
++{
++	if (CMD_ARGC != 1)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	free(hostio4_port);
++	hostio4_port = strdup(CMD_ARGV[0]);
++	if (!hostio4_port)
++		return ERROR_FAIL;
++	return ERROR_OK;
++}
++
++COMMAND_HANDLER(hostio4_handle_base)
++{
++	if (CMD_ARGC != 1)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	COMMAND_PARSE_NUMBER(u32, CMD_ARGV[0], hostio4_base);
++	return ERROR_OK;
++}
++
++COMMAND_HANDLER(hostio4_handle_blocksize)
++{
++	unsigned int n;
++
++	if (CMD_ARGC != 1)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	COMMAND_PARSE_NUMBER(uint, CMD_ARGV[0], n);
++	if (n < 1 || n > HOSTIO4_MAX_BLOCK) {
++		command_print(CMD, "hostio4_blocksize must be 1..%d", HOSTIO4_MAX_BLOCK);
++		return ERROR_COMMAND_ARGUMENT_INVALID;
++	}
++	hostio4_blocksize = n;
++	return ERROR_OK;
++}
++
++COMMAND_HANDLER(hostio4_handle_timeout)
++{
++	if (CMD_ARGC != 1)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	COMMAND_PARSE_NUMBER(uint, CMD_ARGV[0], hostio4_timeout_ms);
++	return ERROR_OK;
++}
++
++COMMAND_HANDLER(hostio4_handle_block_write)
++{
++	if (CMD_ARGC != 1)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	COMMAND_PARSE_ON_OFF(CMD_ARGV[0], hostio4_block_write);
++	if (hostio4_block_write)
++		LOG_WARNING("hostio4: 'U' block upload enabled. A short payload parks the "
++			    "monitor forever; the driver always sends the full byte count, "
++			    "but a stream write that cannot complete will kill the link.");
++	return ERROR_OK;
++}
++
++COMMAND_HANDLER(hostio4_handle_ppb_base)
++{
++	unsigned int ap;
++	uint32_t base;
++
++	if (CMD_ARGC != 2)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	COMMAND_PARSE_NUMBER(uint, CMD_ARGV[0], ap);
++	COMMAND_PARSE_NUMBER(u32, CMD_ARGV[1], base);
++
++	if (ap >= HOSTIO4_MAX_APS) {
++		command_print(CMD, "AP must be 0..%d", HOSTIO4_MAX_APS - 1);
++		return ERROR_COMMAND_ARGUMENT_INVALID;
++	}
++
++	hostio4_ppb_base[ap] = base;
++	hostio4_ppb_en[ap] = (base != 0);
++	return ERROR_OK;
++}
++
++COMMAND_HANDLER(hostio4_handle_info)
++{
++	if (CMD_ARGC != 0)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	command_print(CMD, "hostio4 (nanoSoC ADP monitor) adapter:");
++	command_print(CMD, " port          : %s", hostio4_port ? hostio4_port : "(unset)");
++	command_print(CMD, " base offset   : 0x%08" PRIx32, hostio4_base);
++	command_print(CMD, " block size    : %u words", hostio4_blocksize);
++	command_print(CMD, " cmd timeout   : %u ms", hostio4_timeout_ms);
++	command_print(CMD, " block write   : %s", hostio4_block_write ? "on (U)" : "off (W per word)");
++	command_print(CMD, " D2D blacklist : 0x%08x-0x%08x", HOSTIO4_D2D_LO, HOSTIO4_D2D_HI);
++	for (unsigned int i = 0; i < HOSTIO4_MAX_APS; i++)
++		if (hostio4_ppb_en[i])
++			command_print(CMD, " ap%u PPB alias : 0xE0xxxxxx -> 0x%02" PRIx32 "xxxxxx",
++				      i, hostio4_ppb_base[i] >> 24);
++	command_print(CMD, " wire stats    : block reads %u, single reads %u, "
++			   "word writes %u, block writes %u, bus faults %u",
++		      hostio4_stat_block_reads, hostio4_stat_single_reads,
++		      hostio4_stat_writes, hostio4_stat_block_writes, hostio4_stat_faults);
++	return ERROR_OK;
++}
++
++static const struct command_registration hostio4_command_handlers[] = {
++	{
++		.name = "hostio4_port",
++		.handler = hostio4_handle_port,
++		.mode = COMMAND_CONFIG,
++		.help = "byte stream carrying the ADP monitor: a character device, a pty, "
++			"a unix socket path, or host:port",
++		.usage = "path|host:port",
++	},
++	{
++		.name = "hostio4_base",
++		.handler = hostio4_handle_base,
++		.mode = COMMAND_CONFIG,
++		.help = "address offset added to TAR before it is put on the wire (default 0)",
++		.usage = "offset",
++	},
++	{
++		.name = "hostio4_blocksize",
++		.handler = hostio4_handle_blocksize,
++		.mode = COMMAND_ANY,
++		.help = "maximum words coalesced into one block read (default 16)",
++		.usage = "n",
++	},
++	{
++		.name = "hostio4_timeout",
++		.handler = hostio4_handle_timeout,
++		.mode = COMMAND_ANY,
++		.help = "per-command reply timeout in ms (default 500)",
++		.usage = "ms",
++	},
++	{
++		.name = "hostio4_block_write",
++		.handler = hostio4_handle_block_write,
++		.mode = COMMAND_ANY,
++		.help = "use the 'U' block upload for multi-word writes (default off)",
++		.usage = "on|off",
++	},
++	{
++		.name = "hostio4_ppb_base",
++		.handler = hostio4_handle_ppb_base,
++		.mode = COMMAND_ANY,
++		.help = "alias 0xE0xxxxxx to this base for the given AP, mirroring "
++			"nanosoc_dbg_ahb_bridge; 0 disables (default disabled)",
++		.usage = "ap base",
++	},
++	{
++		.name = "hostio4_info",
++		.handler = hostio4_handle_info,
++		.mode = COMMAND_ANY,
++		.help = "print the hostio4 configuration and wire statistics",
++		.usage = "",
++	},
++	COMMAND_REGISTRATION_DONE
++};
++
++static const struct dap_ops hostio4_dap_ops = {
++	.connect = hostio4_connect,
++	.queue_dp_read = hostio4_dp_q_read,
++	.queue_dp_write = hostio4_dp_q_write,
++	.queue_ap_read = hostio4_ap_q_read,
++	.queue_ap_write = hostio4_ap_q_write,
++	.queue_ap_abort = hostio4_ap_q_abort,
++	.run = hostio4_dp_run,
++};
++
++#ifndef TRANSPORT_DAPDIRECT_SWD
++static const char *const hostio4_transport[] = { "dapdirect_swd", NULL };
++#endif
++
++struct adapter_driver hostio4_adapter_driver = {
++	.name = "hostio4",
++#ifdef TRANSPORT_DAPDIRECT_SWD
++	/* master: a bitmask of transport IDs. TRANSPORT_DAPDIRECT_SWD is a
++	 * #define (BIT(5)) in transport/transport.h, so #ifdef is a valid
++	 * feature test -- the symbol does not exist at all in v0.12.0. */
++	.transport_ids = TRANSPORT_DAPDIRECT_SWD,
++	.transport_preferred_id = TRANSPORT_DAPDIRECT_SWD,
++#else
++	/* v0.12.0: a NULL-terminated string vector instead (interface.h:212),
++	 * modelled on rshim.c:513 at that tag. master REMOVED this member, so
++	 * the two spellings are mutually exclusive and the guard is required --
++	 * one source then builds at both revisions. */
++	.transports = hostio4_transport,
++#endif
++	.commands = hostio4_command_handlers,
++
++	.init = hostio4_init,
++	.quit = hostio4_quit,
++	.reset = hostio4_reset,
++	.speed = hostio4_speed,
++	.khz = hostio4_khz,
++	.speed_div = hostio4_speed_div,
++
++	.dap_swd_ops = &hostio4_dap_ops,
++};

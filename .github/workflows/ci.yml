@@ -1,0 +1,87 @@
+name: board-free gate
+
+# The always-on gate: every board-free stage of `make check`, on hosted runners.
+# It guards the corpus the coverage audit flagged as rotting silently -- the
+# tests/ + pyverify + socket_harness pytest suites and the firmware / stage0 /
+# daemon host-gcc harnesses -- because nothing ran them on change. The EDA and
+# on-board stages (cocotb under VCS, overlay round-trip, board smoke) cannot run
+# on a hosted runner; they live in ci-full.yml on a self-hosted lab runner.
+#
+# See docs/CI.md for the full design and how to reproduce each job locally.
+
+# EVERY branch, not just master/feat/**. Until 2026-09-09 this read
+# `branches: [master, "feat/**"]`, so a chore/, fix/, docs/ or wip/ branch got NO
+# board-free gate at all -- work landed on `chore/public-release-tidy` for weeks
+# with the gate never once running on it. A gate that does not run reads as a
+# pass. `pull_request` alone does not cover it either: the PR event fires only
+# once a PR exists, which is late, and never for direct pushes.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A newer push on the same ref obsoletes the older gate run -- cancel it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  logic-gate:
+    # `make check-ci` == make check stages 1-5: contracts, RM boundary + rm_id
+    # gates, the pytest corpus, the firmware/stage0 host harnesses, and
+    # `make check-linux` -- the MicroBlaze V Linux harness gate (mps3-harnessd's
+    # host build + its tests, ONE conformance suite against ctrl_echo AND
+    # harnessd, stage0 host tests, the generated-DTS/ownership gates, the shell
+    # CPU seam). check-linux has no skip path: a missing piece fails this job.
+    # No EDA tools, no board. Reproduce locally with `make check-ci`.
+    name: logic gate (make check-ci)
+    runs-on: ubuntu-22.04            # 22.04 still ships python 3.8 via setup-python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # FULL history: check-linux-harnessd's codec-identity test does
+          # `git archive $(BASELINE_REV)` (eafe787) to prove a bare-metal image's
+          # bytes are unchanged; the default depth-1 clone does not have that
+          # commit ("fatal: not a valid object name: eafe787", run 35972686710).
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"      # match the deployment box (cocotb 1.7.2 era)
+
+      # tcl: pin-check + the tier-3 stub-xsdb tests; build-essential: the host harnesses;
+      # device-tree-compiler: check-linux's DTS gate (IMAGE); iverilog: the CPU-seam
+      # decoupler-clamp bench in tests/shell_cpu_seam (SHELL) -- the check that catches
+      # the July fork's never-asserting clamp. Without it that bench would not run.
+      - name: System deps (tcl, build-essential, dtc, iverilog)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tcl build-essential device-tree-compiler iverilog
+
+      - name: Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r .github/ci-requirements.txt
+
+      - name: make check-ci
+        run: make check-ci PY=python
+
+  verilator-lint:
+    # RTL lint == make check stage 6. A SEPARATE job on purpose: verilator
+    # version differences (dev box 4.028; ubuntu-22.04 apt 4.038 -- same 4.x lint
+    # engine) then surface as a lint-job signal, never as noise on the logic
+    # gate. If version drift ever causes a false lint failure, pin verilator here
+    # (build 4.028 from source + actions/cache). Reproduce locally with `make lint`.
+    name: verilator lint (make lint)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install verilator
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends verilator
+          verilator --version
+
+      - name: make lint
+        run: make lint

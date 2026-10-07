@@ -1,0 +1,11 @@
+; AUTORUNDELAY10 -- widen the MCC's pre-autorun window from 3 s to 10 s.
+;
+; AUTORUNDELAY is the serial-key-press window before the MCC auto-programs the
+; FPGA and releases the SoC (templates/config.txt). The dark boots are at the
+; unlogged release-to-RUN step, so "does the MCC have more slack before it
+; commits" is a one-key, zero-hardware question -- and it is one of the three
+; variables the audit named.
+;
+; It costs 7 s per boot, which is 70 s on an N=10 campaign: real, and cheap
+; against the alternative of not knowing.
+DESCRIPTION: MCC autorun key-press window widened from 3 s to 10 s

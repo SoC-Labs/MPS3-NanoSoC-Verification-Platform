@@ -1,0 +1,849 @@
+From: SoC Labs
+Subject: [PATCH] add the ahb_qspi NOR flash driver source
+
+src/flash/nor/ahb_qspi.c, VERBATIM from git.soton.ac.uk/soclabs/ahb_qspi @
+c97deb22ed1b ("ahb_qspi: assign .read -- a NULL there SEGFAULTS OpenOCD on
+hardware"), sw/openocd/ahb_qspi.c. GPL-2.0-or-later (its SPDX line).
+The soclabs-openocd recipe symlinks it in (overlay); a Buildroot build cannot
+reach a sibling repo, so it is carried here as a new-file patch, sha-pinned
+(README.md; br2_external/tests/run.sh checks the pin).
+
+--- /dev/null
++++ b/src/flash/nor/ahb_qspi.c
+@@ -0,0 +1,836 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * OpenOCD NOR flash driver for the SoC Labs ahb_qspi controller,
++ * with Arm CoreLink AHB Flash Cache (CG092 r2p0) coherency management.
++ *
++ * Copyright (C) 2026, SoC Labs (www.soclabs.org)
++ *
++ * ---------------------------------------------------------------------------
++ * STATUS: BUILDS CLEAN, NEVER RUN ON HARDWARE. Written 2026-09-17 against the
++ * RTL and two proven bench scripts. Compiles against OpenOCD master c2fc07b with
++ * zero warnings at the project's own -Werror level, and `flash bank ... ahb_qspi`
++ * parses at runtime -- but it has never erased or programmed a real part. Every
++ * numeric constant below is cited to its source. Treat it as a reviewed draft
++ * until it has been exercised on silicon.
++ *
++ * KNOWN GAP: qspi_xfer() documents len in {1,2,3,4,8,12,16} as the safe set, and
++ * ahb_qspi_write() does not snap its chunk to it -- a trailing partial write of,
++ * say, 5 bytes would use an unverified length. The cited RTL evidence covers the
++ * RECEIVE shift register only; whether the transmit path has the same
++ * restriction is unconfirmed. Confirm against qspi_controller.sv before relying
++ * on unaligned writes.
++ * ---------------------------------------------------------------------------
++ *
++ * WHY THIS EXISTS
++ *
++ * Reading flash already works through an OpenOCD mem_ap target plus the XiP
++ * window, and programming already works through pynq/scripts/openocd/
++ * qspi_flash_direct.tcl. The ONLY capability this driver adds that Tcl cannot
++ * is `gdb load` straight to a flash address: gdb_server.c only advertises
++ * qXfer:memory-map when flash_get_bank_count() > 0, and without a bank gdb
++ * issues plain memory writes that never reach vFlashErase/vFlashWrite. Weigh
++ * that against carrying an out-of-tree driver before adopting this.
++ *
++ * REGISTER MAP -- ahb_qspi APB block, default base 0x21000000
++ *   0x00 CTRL      b0 QIO_MODE, b8 XIP_ACTIVE, b16-23 MODE_CODE,
++ *                  b24 CONT_READ, b25 NO_CMD
++ *   0x04 STATUS    b0 BUSY (RO), b8 IRQ_CLR (W1C-ish)
++ *   0x08 SPI_CMD   b0-7 opcode, b8 ENABLE, b9 READ, b10 WRITE, b11 ADDR_EN,
++ *                  b12-15 DUMMY_CYCLES, b16-19 N_RW_BYTES (genuinely N-1)
++ *   0x0C SPI_ADDR  b0-21 only -- 22 bits, 4 MB ceiling, silent truncation
++ *   0x10 RDATA0..3
++ *   0x20 WDATA0..3
++ *   0x30 AHB_SPI_SETUP  b0-7 opcode, b12-15 dummy -- resets to 0x00/0, MUST be
++ *                       programmed before XIP_ACTIVE is set
++ *   0x34 CLK_DIV   5 bits, reset 1, writes of 0 clamped to 1 in HW
++ *
++ * CG092 flash cache, base + 0x1000 (confirmed two ways: cmsdk_apb_slave_mux
++ * DECODE4BIT(PADDR[15:12])==1, and sys_desc/nanosoc_ss_qspi.yaml:32-34)
++ *   0x000 CCR      b0 EN, b1 INV_REQ, b4 SET_MAN_INV, b5 SET_PREFETCH
++ *   0x004 SR       b1:0 state, b2 INV_STAT, b4 POW_STAT
++ *   0x00C IRQSTAT  b1 MAN_INV_ERR, b0 POW_ERR
++ */
++
++#include <helper/binarybuffer.h>
++#include <helper/bits.h>
++#include <helper/time_support.h>
++#include <target/target.h>
++
++#include "imp.h"
++#include "spi.h"
++
++/* ------------------------------------------------------------------------- */
++/* Controller registers                                                       */
++/* ------------------------------------------------------------------------- */
++
++#define QSPI_CTRL		0x00
++#define QSPI_STATUS		0x04
++#define QSPI_SPI_CMD		0x08
++#define QSPI_SPI_ADDR		0x0c
++#define QSPI_RDATA0		0x10
++#define QSPI_WDATA0		0x20
++#define QSPI_AHB_SETUP		0x30
++#define QSPI_CLK_DIV		0x34
++
++#define CTRL_QIO_MODE		BIT(0)
++#define CTRL_XIP_ACTIVE		BIT(8)
++
++#define STATUS_BUSY		BIT(0)
++
++#define CMD_ENABLE		BIT(8)
++#define CMD_READ		BIT(9)
++#define CMD_WRITE		BIT(10)
++#define CMD_ADDR_EN		BIT(11)
++#define CMD_DUMMY_SHIFT		12
++#define CMD_NBYTES_SHIFT	16
++
++/*
++ * DUMMY_CYCLES IS A LITERAL CYCLE COUNT, NOT (N-1).
++ *
++ * Three places in the source tree say otherwise -- src/rdl/apb_qspi_regs.rdl,
++ * sw/qspi_driver.c and nanosoc_arch_tech/.../qspi_flash.h all describe an N-1
++ * field plus a "controller off-by-one" defect. There is no such defect.
++ *
++ * qspi_controller.sv:224 computes qspi_dummy_cycles_m1 = field - 1, and :351
++ * exits the DUMMY state on (dummy_counter >= m1) with dummy_counter reset to 0
++ * at :564. A counter running 0 .. field-1 dwells for `field` cycles. The `- 1`
++ * is the zero-based/one-based fixup, not an encoding.
++ *
++ * Bench history confirms it independently: field=7 failed "one short", field=8
++ * works. Under N-1, field=7 would BE 8 cycles and would have worked.
++ *
++ * So: write the number of cycles the opcode actually wants. 8 for 0x0B.
++ */
++#define CMD_DUMMY(n)		(((n) & 0xf) << CMD_DUMMY_SHIFT)
++
++/* Dummy cycles for SPIFLASH_FAST_READ (0x0B). JEDEC-standard 8, and the value
++ * the existing bench scripts already use -- they just describe it wrongly as
++ * "N-1 of 9". Literal, per the comment above. */
++#define QSPI_FAST_READ_DUMMY	8
++
++/* N_RW_BYTES genuinely IS (N-1): field 0 completes after exactly 1 byte
++ * (qspi_controller.sv:368,379,394,403). Max 16 bytes per command. */
++#define CMD_NBYTES(n)		((((n) - 1) & 0xf) << CMD_NBYTES_SHIFT)
++
++/* SPI_ADDR is physically 22 bits (apb_qspi_regs.v:136, QSPI_ADDR=reg3[21:0]).
++ * Offsets at or above this alias silently back into the low 4 MB. This is a
++ * property of the CONTROLLER, so it caps every platform regardless of the
++ * density of the part fitted. */
++#define QSPI_ADDR_BITS		22
++#define QSPI_MAX_SIZE		(1u << QSPI_ADDR_BITS)
++
++/*
++ * CLK_DIV: SCLK = HCLK / (2 * CLK_DIV), reset 1. Writes of 0 are clamped to 1
++ * in the register block (apb_qspi_regs.v:194-198) so the divider bypass is
++ * unreachable from software.
++ *
++ * CLK_DIV=1 garbles RDID -- measured on silicon, board 01_pl, recorded in
++ * ahb_qspi/docs/cocotb-silicon-findings.md:22. Erase/program/FAST_READ are fine
++ * at 1, so this constant applies to probe only.
++ */
++#define QSPI_CLK_DIV_PROBE	2
++
++/* ------------------------------------------------------------------------- */
++/* CG092 flash cache                                                          */
++/* ------------------------------------------------------------------------- */
++
++#define CACHE_OFFSET		0x1000
++#define CACHE_CCR		0x000
++#define CACHE_SR		0x004
++#define CACHE_IRQSTAT		0x00c
++
++#define CCR_EN			BIT(0)
++#define CCR_INV_REQ		BIT(1)
++#define CCR_SET_MAN_INV		BIT(4)
++#define CCR_SET_PREFETCH	BIT(5)
++
++#define SR_INV_STAT		BIT(2)
++#define SR_POW_STAT		BIT(4)
++
++#define IRQSTAT_POW_ERR		BIT(0)
++#define IRQSTAT_MAN_INV_ERR	BIT(1)
++
++/* ------------------------------------------------------------------------- */
++
++#define QSPI_TIMEOUT_MS		3000
++#define QSPI_MAX_XFER		16	/* WDATA0..3 window */
++
++struct ahb_qspi_flash_bank {
++	bool probed;
++	bool xip_was_on;	/* CTRL.XIP_ACTIVE as we found it */
++	uint32_t ccr_saved;	/* CG092 CCR as we found it */
++	uint32_t ctrl_base;		/* APB register block */
++	uint32_t cache_base;		/* CG092, ctrl_base + 0x1000 */
++	bool have_cache;
++	const struct flash_device *dev;
++};
++
++static int qspi_rd(struct flash_bank *bank, uint32_t off, uint32_t *v)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	return target_read_u32(bank->target, p->ctrl_base + off, v);
++}
++
++static int qspi_wr(struct flash_bank *bank, uint32_t off, uint32_t v)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	return target_write_u32(bank->target, p->ctrl_base + off, v);
++}
++
++/*
++ * Wait for a command to complete.
++ *
++ * BUSY crosses SCLK->PCLK through a 2-FF synchroniser (apb_qspi_regs.v:78-93),
++ * roughly 6-8 HCLK of latency. A naive single "while (BUSY)" can therefore read
++ * BUSY==0 before it ever asserts, fall straight through and latch stale RDATA.
++ * This is a recorded historical bug -- see qspi_wait_busy() in
++ * firmware/apps/qspi_flasher/main.c:258-297 and the `cbusy` proc in the bench
++ * Tcl. So: wait for BUSY to RISE, then wait for it to FALL.
++ *
++ * Note this is a debugger-side poll over SWD; each read is slow enough that the
++ * rise may already have happened by the first sample. Missing the rise is
++ * therefore NOT treated as an error -- only never seeing it fall is.
++ */
++static int qspi_wait_done(struct flash_bank *bank)
++{
++	int64_t t0 = timeval_ms();
++	uint32_t s;
++	int retval;
++
++	/* Opportunistically observe the rise; do not fail if we miss it. */
++	do {
++		retval = qspi_rd(bank, QSPI_STATUS, &s);
++		if (retval != ERROR_OK)
++			return retval;
++		if (s & STATUS_BUSY)
++			break;
++	} while (timeval_ms() - t0 < 20);
++
++	/* The real completion wait. */
++	for (;;) {
++		retval = qspi_rd(bank, QSPI_STATUS, &s);
++		if (retval != ERROR_OK)
++			return retval;
++		if (!(s & STATUS_BUSY))
++			return ERROR_OK;
++		if (timeval_ms() - t0 > QSPI_TIMEOUT_MS) {
++			LOG_ERROR("ahb_qspi: command timeout, STATUS=0x%08" PRIx32, s);
++			return ERROR_FLASH_OPERATION_FAILED;
++		}
++		alive_sleep(1);
++	}
++}
++
++/*
++ * Leave XiP before touching the command path.
++ *
++ * While CTRL.XIP_ACTIVE is set, qspi_controller_mux forces APB_QSPI_BUSY to 1
++ * and APB_QSPI_ENABLE_ACK to 0 (qspi_controller_mux.v:65,69). STATUS.BUSY then
++ * reads permanently high and SPI_CMD writes have no effect -- a command issued
++ * in this state spins to its timeout and returns stale RDATA. Every command
++ * sequence must clear this bit first.
++ */
++static int qspi_xip_off(struct flash_bank *bank)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	uint32_t ctrl;
++	int retval = qspi_rd(bank, QSPI_CTRL, &ctrl);
++	if (retval != ERROR_OK)
++		return retval;
++
++	/* Remember whether XiP was on so we can put it back. Leaving it off is
++	 * not a neutral act: .read is NULL, so default_flash_read(),
++	 * default_flash_blank_check(), `flash verify_image` and gdb's post-load
++	 * verify all read bank->base through the XiP window. A driver that
++	 * disables XiP and never restores it kills its own read path after the
++	 * first auto_probe. */
++	p->xip_was_on = (ctrl & CTRL_XIP_ACTIVE) != 0;
++
++	return qspi_wr(bank, QSPI_CTRL, ctrl & ~CTRL_XIP_ACTIVE);
++}
++
++/*
++ * Restore XiP if it was on when we took it away.
++ *
++ * AHB_SPI_SETUP must be programmed FIRST. It resets to opcode 0x00 with zero
++ * dummy cycles, so setting XIP_ACTIVE against an unprogrammed setup register
++ * issues an undefined opcode on every AHB fetch. We reprogram it every time
++ * rather than trusting whatever was there, because we cannot know what ran
++ * before us.
++ *
++ * Dummy cycles are written LITERALLY -- see the CMD_DUMMY comment. The fast
++ * read opcode and its dummy count come from the probed device, so a part
++ * needing something other than 8 is handled without a special case.
++ */
++static int qspi_xip_on(struct flash_bank *bank)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	uint32_t ctrl;
++	int retval;
++
++	if (!p->xip_was_on)
++		return ERROR_OK;
++
++	retval = qspi_wr(bank, QSPI_AHB_SETUP,
++			 SPIFLASH_FAST_READ | (QSPI_FAST_READ_DUMMY << 12));
++	if (retval != ERROR_OK)
++		return retval;
++
++	retval = qspi_rd(bank, QSPI_CTRL, &ctrl);
++	if (retval != ERROR_OK)
++		return retval;
++
++	return qspi_wr(bank, QSPI_CTRL, ctrl | CTRL_XIP_ACTIVE);
++}
++
++/* Issue one SPI transaction. data_out/data_in may be NULL. len <= 16.
++ *
++ * Only len in {1,2,3,4,8,12,16} is safe: for other lengths the RTL slices the
++ * receive shift register with hand-coded, non-uniform case arms
++ * (qspi_controller.sv:654-665) and the byte-to-lane mapping does not reduce to
++ * little-endian. Callers must stick to the safe set or request 16 and discard
++ * the tail. */
++static int qspi_xfer(struct flash_bank *bank, uint8_t opcode, bool use_addr,
++		     uint32_t addr, unsigned dummy_cycles,
++		     const uint8_t *data_out, uint8_t *data_in, unsigned len)
++{
++	uint32_t cmd = opcode | CMD_ENABLE | CMD_DUMMY(dummy_cycles);
++	int retval;
++
++	if (len > QSPI_MAX_XFER) {
++		LOG_ERROR("ahb_qspi: transfer of %u exceeds the %d-byte window",
++			  len, QSPI_MAX_XFER);
++		return ERROR_FAIL;
++	}
++
++	if (use_addr) {
++		if (addr >= QSPI_MAX_SIZE) {
++			LOG_ERROR("ahb_qspi: offset 0x%08" PRIx32 " exceeds the "
++				  "controller's %u-bit address (%u MB); it would "
++				  "alias silently", addr, QSPI_ADDR_BITS,
++				  QSPI_MAX_SIZE >> 20);
++			return ERROR_FLASH_DST_OUT_OF_BANK;
++		}
++		retval = qspi_wr(bank, QSPI_SPI_ADDR, addr);
++		if (retval != ERROR_OK)
++			return retval;
++		cmd |= CMD_ADDR_EN;
++	}
++
++	if (data_out) {
++		uint32_t w[4] = { 0, 0, 0, 0 };
++		/* Natural byte order. The hardware bit-reverses each byte on the
++		 * way out so the wire sees MSB-first (apb_qspi_regs.v:138-163);
++		 * software must NOT pre-reverse. */
++		for (unsigned i = 0; i < len; i++)
++			w[i / 4] |= (uint32_t)data_out[i] << ((i % 4) * 8);
++		for (unsigned j = 0; j < (len + 3) / 4; j++) {
++			retval = qspi_wr(bank, QSPI_WDATA0 + 4 * j, w[j]);
++			if (retval != ERROR_OK)
++				return retval;
++		}
++		cmd |= CMD_WRITE | CMD_NBYTES(len);
++	} else if (data_in) {
++		cmd |= CMD_READ | CMD_NBYTES(len);
++	}
++
++	retval = qspi_wr(bank, QSPI_SPI_CMD, cmd);
++	if (retval != ERROR_OK)
++		return retval;
++
++	retval = qspi_wait_done(bank);
++	if (retval != ERROR_OK)
++		return retval;
++
++	if (data_in) {
++		uint32_t r[4];
++		for (unsigned j = 0; j < (len + 3) / 4; j++) {
++			retval = qspi_rd(bank, QSPI_RDATA0 + 4 * j, &r[j]);
++			if (retval != ERROR_OK)
++				return retval;
++		}
++		if (len < 4) {
++			/* 1-3 byte reads land LEFT-justified in the top of
++			 * RDATA0 (qspi_controller.sv:648-653). */
++			uint32_t v = r[0] >> (8 * (4 - len));
++			for (unsigned i = 0; i < len; i++)
++				data_in[i] = (v >> (8 * i)) & 0xff;
++		} else {
++			for (unsigned i = 0; i < len; i++)
++				data_in[i] = (r[i / 4] >> ((i % 4) * 8)) & 0xff;
++		}
++	}
++
++	return ERROR_OK;
++}
++
++static int qspi_simple_cmd(struct flash_bank *bank, uint8_t opcode)
++{
++	return qspi_xfer(bank, opcode, false, 0, 0, NULL, NULL, 0);
++}
++
++static int qspi_read_status(struct flash_bank *bank, uint8_t *sr)
++{
++	return qspi_xfer(bank, SPIFLASH_READ_STATUS, false, 0, 0, NULL, sr, 1);
++}
++
++static int qspi_wait_wip(struct flash_bank *bank, int timeout_ms)
++{
++	int64_t t0 = timeval_ms();
++	for (;;) {
++		uint8_t sr;
++		int retval = qspi_read_status(bank, &sr);
++		if (retval != ERROR_OK)
++			return retval;
++		if (!(sr & SPIFLASH_BSY_BIT))
++			return ERROR_OK;
++		if (timeval_ms() - t0 > timeout_ms) {
++			LOG_ERROR("ahb_qspi: WIP still set after %d ms", timeout_ms);
++			return ERROR_FLASH_OPERATION_FAILED;
++		}
++		alive_sleep(1);
++	}
++}
++
++/* ------------------------------------------------------------------------- */
++/* CG092 cache coherency                                                      */
++/* ------------------------------------------------------------------------- */
++
++static int cache_rd(struct flash_bank *bank, uint32_t off, uint32_t *v)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	return target_read_u32(bank->target, p->cache_base + off, v);
++}
++
++static int cache_wr(struct flash_bank *bank, uint32_t off, uint32_t v)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	return target_write_u32(bank->target, p->cache_base + off, v);
++}
++
++/*
++ * Disable the cache before an erase or program.
++ *
++ * Two independent reasons:
++ *
++ *  1. Coherency. Erase and program go through the APB command path, which the
++ *     cache never observes, so lines resident from an earlier XiP read go
++ *     stale. There is no line-granular invalidate anywhere in the CG092 RTL --
++ *     reg_inv_addr sweeps every tag index -- so the only remedy is a full
++ *     invalidate, and the cleanest way to trigger one is the automatic sweep
++ *     that runs on every disabled->enabled transition.
++ *
++ *  2. Erratum 1027536, Category B, PRESENT IN r2p0 AND STILL OPEN. With the
++ *     prefetcher enabled, a downstream error response during a prefetch can
++ *     yield "incorrect data provided to the initiator on the upstream AHB port"
++ *     with no error notification. Arm's stated workaround is to disable the
++ *     cache before a write or erase starts. We additionally force SET_PREFETCH
++ *     to 0, which removes the failure mode outright.
++ *
++ * Note CTRL.XIP_ACTIVE has NO connection to the cache -- cache_subsystem has no
++ * XIP_ACTIVE input at all. Clearing it does not invalidate anything.
++ */
++static int cache_disable(struct flash_bank *bank)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	int64_t t0;
++	int retval;
++
++	if (!p->have_cache)
++		return ERROR_OK;
++
++	/* Save CCR so the re-enable can put back what the platform was actually
++	 * running -- prefetch setting included. Erratum 1027536 says disable the
++	 * cache before a write or erase; it does not say leave prefetch off
++	 * forever afterwards, and a system deliberately running cache-off must
++	 * not be silently switched on by a flash write. */
++	retval = cache_rd(bank, CACHE_CCR, &p->ccr_saved);
++	if (retval != ERROR_OK)
++		return retval;
++
++	/* Clear EN and PREFETCH together; leave SET_MAN_INV at 0 so that the
++	 * subsequent re-enable performs the automatic sweep. */
++	retval = cache_wr(bank, CACHE_CCR, 0);
++	if (retval != ERROR_OK)
++		return retval;
++
++	/* Poll POW_STAT rather than trusting the write: this confirms the enable
++	 * FSM actually reached the fully-disabled state. */
++	t0 = timeval_ms();
++	for (;;) {
++		uint32_t sr;
++		retval = cache_rd(bank, CACHE_SR, &sr);
++		if (retval != ERROR_OK)
++			return retval;
++		if (!(sr & SR_POW_STAT))
++			return ERROR_OK;
++		if (timeval_ms() - t0 > QSPI_TIMEOUT_MS) {
++			LOG_ERROR("ahb_qspi: cache did not reach disabled, SR=0x%08" PRIx32, sr);
++			return ERROR_FLASH_OPERATION_FAILED;
++		}
++		alive_sleep(1);
++	}
++}
++
++/*
++ * Re-enable the cache and wait for the automatic invalidate to finish.
++ *
++ * Auto mode is used deliberately. Manual invalidate (SET_MAN_INV=1 then
++ * INV_REQ) only takes effect while the enable FSM is at state 0; requesting it
++ * anywhere else latches MAN_INV_ERR *and* force-clears CCR.EN
++ * (p_flash_cache_f0_core.v:1356,1617) -- the cache silently disables itself.
++ * Auto mode has no such ordering trap and blocks AHB traffic until the sweep
++ * completes, which is exactly the guarantee we need.
++ */
++static int cache_enable_and_invalidate(struct flash_bank *bank)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	int64_t t0;
++	uint32_t irq;
++	int retval;
++
++	if (!p->have_cache)
++		return ERROR_OK;
++
++	/* If the cache was already disabled when we arrived, leave it that way --
++	 * there is nothing stale to sweep and enabling it would change platform
++	 * behaviour behind the user's back. */
++	if (!(p->ccr_saved & CCR_EN))
++		return ERROR_OK;
++
++	/* Restore what we found, but force SET_MAN_INV low so the enable runs the
++	 * automatic invalidate sweep (manual mode has an ordering trap and no
++	 * coherency benefit here). */
++	retval = cache_wr(bank, CACHE_CCR, p->ccr_saved & ~CCR_SET_MAN_INV);
++	if (retval != ERROR_OK)
++		return retval;
++
++	t0 = timeval_ms();
++	for (;;) {
++		uint32_t sr;
++		retval = cache_rd(bank, CACHE_SR, &sr);
++		if (retval != ERROR_OK)
++			return retval;
++		if (!(sr & SR_INV_STAT))
++			break;
++		if (timeval_ms() - t0 > QSPI_TIMEOUT_MS) {
++			LOG_ERROR("ahb_qspi: cache invalidate did not complete, SR=0x%08" PRIx32, sr);
++			return ERROR_FLASH_OPERATION_FAILED;
++		}
++		alive_sleep(1);
++	}
++
++	/* If either error latched, the cache force-disabled itself and the XiP
++	 * window must not be trusted. Surface it rather than reading ghosts. */
++	retval = cache_rd(bank, CACHE_IRQSTAT, &irq);
++	if (retval != ERROR_OK)
++		return retval;
++	if (irq & (IRQSTAT_MAN_INV_ERR | IRQSTAT_POW_ERR)) {
++		LOG_ERROR("ahb_qspi: cache error after invalidate, IRQSTAT=0x%08" PRIx32
++			  " -- XiP reads are not trustworthy", irq);
++		cache_wr(bank, CACHE_IRQSTAT, irq);	/* W1C */
++		return ERROR_FLASH_OPERATION_FAILED;
++	}
++
++	return ERROR_OK;
++}
++
++/* ------------------------------------------------------------------------- */
++/* Driver callbacks                                                           */
++/* ------------------------------------------------------------------------- */
++
++static int ahb_qspi_erase(struct flash_bank *bank, unsigned int first,
++			  unsigned int last)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	int retval;
++
++	if (!p->probed)
++		return ERROR_FLASH_BANK_NOT_PROBED;
++
++	retval = cache_disable(bank);
++	if (retval != ERROR_OK)
++		return retval;
++
++	retval = qspi_xip_off(bank);
++	if (retval != ERROR_OK)
++		goto out;
++
++	for (unsigned int s = first; s <= last; s++) {
++		retval = qspi_simple_cmd(bank, SPIFLASH_WRITE_ENABLE);
++		if (retval != ERROR_OK)
++			goto out;
++
++		retval = qspi_xfer(bank, p->dev->erase_cmd, true,
++				   bank->sectors[s].offset, 0, NULL, NULL, 0);
++		if (retval != ERROR_OK)
++			goto out;
++
++		retval = qspi_wait_wip(bank, QSPI_TIMEOUT_MS);
++		if (retval != ERROR_OK)
++			goto out;
++	}
++
++out:
++	/* Restore cache AND XiP even on the failure path: leaving either off
++	 * would silently change behaviour for everyone after us, and with
++	 * .read == NULL a dead XiP window breaks this driver's own read path. */
++	{
++		int r2 = cache_enable_and_invalidate(bank);
++		int r3 = qspi_xip_on(bank);
++		if (retval == ERROR_OK)
++			retval = (r2 != ERROR_OK) ? r2 : r3;
++	}
++	return retval;
++}
++
++static int ahb_qspi_write(struct flash_bank *bank, const uint8_t *buffer,
++			  uint32_t offset, uint32_t count)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	int retval;
++
++	if (!p->probed)
++		return ERROR_FLASH_BANK_NOT_PROBED;
++
++	if (offset + count > bank->size) {
++		LOG_ERROR("ahb_qspi: write past end of bank");
++		return ERROR_FLASH_DST_OUT_OF_BANK;
++	}
++
++	retval = cache_disable(bank);
++	if (retval != ERROR_OK)
++		return retval;
++
++	retval = qspi_xip_off(bank);
++	if (retval != ERROR_OK)
++		goto out;
++
++	while (count) {
++		/* Two limits apply: the 16-byte WDATA window, and the device's
++		 * page boundary. The window is the tighter of the two for any
++		 * sane page size, but honour both. */
++		uint32_t page_left = p->dev->pagesize -
++				     (offset % p->dev->pagesize);
++		uint32_t chunk = count;
++
++		if (chunk > QSPI_MAX_XFER)
++			chunk = QSPI_MAX_XFER;
++		if (chunk > page_left)
++			chunk = page_left;
++
++		retval = qspi_simple_cmd(bank, SPIFLASH_WRITE_ENABLE);
++		if (retval != ERROR_OK)
++			goto out;
++
++		retval = qspi_xfer(bank, p->dev->pprog_cmd, true, offset, 0,
++				   buffer, NULL, chunk);
++		if (retval != ERROR_OK)
++			goto out;
++
++		retval = qspi_wait_wip(bank, QSPI_TIMEOUT_MS);
++		if (retval != ERROR_OK)
++			goto out;
++
++		buffer += chunk;
++		offset += chunk;
++		count  -= chunk;
++	}
++
++out:
++	{
++		int r2 = cache_enable_and_invalidate(bank);
++		int r3 = qspi_xip_on(bank);
++		if (retval == ERROR_OK)
++			retval = (r2 != ERROR_OK) ? r2 : r3;
++	}
++	return retval;
++}
++
++static int ahb_qspi_probe(struct flash_bank *bank)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	uint32_t saved_div, id = 0;
++	uint8_t rx[3];
++	int retval;
++
++	free(bank->sectors);
++	bank->sectors = NULL;
++	bank->num_sectors = 0;
++	p->probed = false;
++	/* Without this, a second probe that fails to match leaves the PREVIOUS
++	 * device in place and the `if (!p->dev)` guard below passes -- the driver
++	 * would silently keep using stale geometry. */
++	p->dev = NULL;
++
++	retval = qspi_xip_off(bank);
++	if (retval != ERROR_OK)
++		return retval;
++
++	/* CLK_DIV=1 garbles RDID on silicon (cocotb-silicon-findings.md:22).
++	 * Raise it for the ID read only, then restore. */
++	retval = qspi_rd(bank, QSPI_CLK_DIV, &saved_div);
++	if (retval != ERROR_OK)
++		return retval;
++	if ((saved_div & 0x1f) < QSPI_CLK_DIV_PROBE) {
++		retval = qspi_wr(bank, QSPI_CLK_DIV, QSPI_CLK_DIV_PROBE);
++		if (retval != ERROR_OK)
++			return retval;
++	}
++
++	retval = qspi_xfer(bank, SPIFLASH_READ_ID, false, 0, 0, NULL, rx, 3);
++
++	if ((saved_div & 0x1f) < QSPI_CLK_DIV_PROBE)
++		qspi_wr(bank, QSPI_CLK_DIV, saved_div);
++
++	if (retval != ERROR_OK)
++		return retval;
++
++	/* flash_devices[] keys on the 3 JEDEC bytes with the manufacturer in the
++	 * LSB: Micron 0x20/BA/19 is tabled as 0x0019ba20. */
++	id = rx[0] | ((uint32_t)rx[1] << 8) | ((uint32_t)rx[2] << 16);
++
++	if (id == 0x000000 || id == 0xffffff) {
++		LOG_ERROR("ahb_qspi: no flash responded to RDID (0x%06" PRIx32 "). "
++			  "If the part may be in deep power-down, issue 0xAB first.",
++			  id);
++		return ERROR_FLASH_OPERATION_FAILED;
++	}
++
++	for (const struct flash_device *d = flash_devices; d->name; d++) {
++		if (d->device_id == id) {
++			p->dev = d;
++			break;
++		}
++	}
++	if (!p->dev) {
++		LOG_ERROR("ahb_qspi: unknown flash, JEDEC ID 0x%06" PRIx32
++			  " -- add an entry to flash_devices[] in spi.c", id);
++		return ERROR_FLASH_OPERATION_FAILED;
++	}
++
++	/* flash_devices[] carries FRAM entries whose FRAM_ID macro sets pagesize
++	 * and sectorsize to 0. Dividing by those later is a SIGFPE that takes
++	 * OpenOCD down, so refuse the part here instead. */
++	if (p->dev->sectorsize == 0 || p->dev->pagesize == 0) {
++		LOG_ERROR("ahb_qspi: %s reports zero page/sector geometry and is not "
++			  "supported by this driver", p->dev->name);
++		p->dev = NULL;
++		return ERROR_FLASH_OPERATION_FAILED;
++	}
++
++	LOG_INFO("ahb_qspi: found %s (id 0x%06" PRIx32 "), %" PRIu32 " KiB",
++		 p->dev->name, id, p->dev->size_in_bytes / 1024);
++
++	/*
++	 * Clamp to the controller's reach, not the device's capacity.
++	 *
++	 * SPI_ADDR is 22 bits, so 4 MB is addressable no matter what is fitted.
++	 * On a PYNQ-Z2 the Pmod SF3 carries a 32 MB N25Q256A of which 28 MB are
++	 * unreachable. Reporting the device size here would offer gdb and
++	 * `program` addresses the hardware cannot produce.
++	 */
++	bank->size = p->dev->size_in_bytes;
++	if (bank->size > QSPI_MAX_SIZE) {
++		LOG_WARNING("ahb_qspi: device is %" PRIu32 " MB but the controller "
++			    "addresses only %u MB (SPI_ADDR is %d bits); "
++			    "clamping the bank",
++			    p->dev->size_in_bytes >> 20,
++			    QSPI_MAX_SIZE >> 20, QSPI_ADDR_BITS);
++		bank->size = QSPI_MAX_SIZE;
++	}
++
++	bank->num_sectors = bank->size / p->dev->sectorsize;
++	bank->sectors = alloc_block_array(0, p->dev->sectorsize,
++					  bank->num_sectors);
++	if (!bank->sectors)
++		return ERROR_FAIL;
++
++	p->probed = true;
++
++	/* Put XiP back now that we know the device: default_flash_read() and
++	 * default_flash_blank_check() both read bank->base through that window. */
++	return qspi_xip_on(bank);
++}
++
++static int ahb_qspi_auto_probe(struct flash_bank *bank)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++	return p->probed ? ERROR_OK : ahb_qspi_probe(bank);
++}
++
++static int ahb_qspi_info(struct flash_bank *bank, struct command_invocation *cmd)
++{
++	struct ahb_qspi_flash_bank *p = bank->driver_priv;
++
++	if (!p->probed) {
++		command_print_sameline(cmd, "ahb_qspi: not probed");
++		return ERROR_OK;
++	}
++
++	command_print_sameline(cmd,
++		"ahb_qspi at 0x%08" PRIx32 ", flash %s, %" PRIu32 " KiB usable"
++		"%s, CG092 cache %s",
++		p->ctrl_base, p->dev->name, bank->size / 1024,
++		(p->dev->size_in_bytes > QSPI_MAX_SIZE) ? " (device clamped to controller reach)" : "",
++		p->have_cache ? "managed" : "not present");
++	return ERROR_OK;
++}
++
++/* flash bank <name> ahb_qspi <base> <size> 0 0 <target> [ctrl_base] [no_cache]
++ *
++ * <base> is the XiP window (typically 0x24000000) so that the default `read`
++ * path and gdb's memory map address flash where the CPU sees it. [ctrl_base]
++ * defaults to 0x21000000. Pass `no_cache` for an integration without CG092. */
++FLASH_BANK_COMMAND_HANDLER(ahb_qspi_flash_bank_command)
++{
++	struct ahb_qspi_flash_bank *p;
++
++	if (CMD_ARGC < 6)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	p = calloc(1, sizeof(*p));
++	if (!p)
++		return ERROR_FAIL;
++
++	p->ctrl_base = 0x21000000;
++	p->have_cache = true;
++
++	for (unsigned int i = 6; i < CMD_ARGC; i++) {
++		if (!strcmp(CMD_ARGV[i], "no_cache")) {
++			p->have_cache = false;
++		} else {
++			COMMAND_PARSE_NUMBER(u32, CMD_ARGV[i], p->ctrl_base);
++		}
++	}
++	p->cache_base = p->ctrl_base + CACHE_OFFSET;
++
++	bank->driver_priv = p;
++	return ERROR_OK;
++}
++
++const struct flash_driver ahb_qspi_flash = {
++	.name			= "ahb_qspi",
++	.flash_bank_command	= ahb_qspi_flash_bank_command,
++	.erase			= ahb_qspi_erase,
++	.write			= ahb_qspi_write,
++	/* default_flash_read() does a plain target_read_buffer() at bank->base,
++	 * i.e. through the XiP window, which an OpenOCD mem_ap target reads
++	 * correctly. Every write path above invalidates the cache before
++	 * returning, so those reads are coherent.
++	 *
++	 * It MUST be assigned explicitly. flash_driver_read() (core.c:109) calls
++	 * bank->driver->read() with NO null check and NO fallback -- unlike
++	 * flash_driver_verify(), which does guard with a ternary. Leaving this
++	 * NULL SEGFAULTS OpenOCD (instruction fetch from address 0) the first
++	 * time anything reads through the flash API: `flash fillw` (its readback
++	 * step), `flash read_bank`, `flash verify_image`. Measured on hardware
++	 * 2026-09-18, board 01_pl, and it took the whole session down with it.
++	 * The 58 other NOR drivers in-tree all assign it for this reason. */
++	.read			= default_flash_read,
++	.probe			= ahb_qspi_probe,
++	.auto_probe		= ahb_qspi_auto_probe,
++	.erase_check		= default_flash_blank_check,
++	.info			= ahb_qspi_info,
++	.free_driver_priv	= default_flash_free_driver_priv,
++};

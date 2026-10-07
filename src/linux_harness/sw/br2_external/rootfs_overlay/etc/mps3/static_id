@@ -1,0 +1,22 @@
+0x00000000
+# ^^^ LINE 1 IS THE ONLY LINE READ (mps3-harnessd --static-id-file, and the
+# legacy mps3-ctrld/mps3-pushd: fgets line 1 then strtoul, base auto: 0x<hex>).
+# 0x00000000 = NOT PROVISIONED (the firmware's weak default). Image-owned: never
+# persisted (IMAGE_CONTRACT §3.2). Everything below is documentation.
+#
+# PROVISIONING (pick one; never a committed real id — this file ships 0x0):
+#
+#  (a) IMAGE BAKE (build time): run the build with the env set —
+#          MPS3_STATIC_ID=0xD84A2E7A ./build.sh
+#      The Buildroot post-build hook (br2_external/board/mps3_provision.sh)
+#      replaces THIS file in the target rootfs with the provisioned id (a
+#      bare `0x...` value). Unset => 0x0 ships (unprovisioned).
+#
+#  (b) BOARD TIME (DT property, DRIVER_MATRIX open item 10): the successor
+#      static can carry `soclabs,static-id = <0x...>;` on the DTS root node.
+#      A boot hook would read /proc/device-tree/soclabs,static-id and write
+#      it to line 1 here before the harness process starts. (Under stage0 the
+#      authority is the stage0 status block's fabric_static_id —
+#      STAGE0_CONTRACT §3.1; this file is the image's provisioned claim.) This is the
+#      natural home once the new static exists and mints its id; until then
+#      the DT node is absent and the bake path (a) is authoritative.

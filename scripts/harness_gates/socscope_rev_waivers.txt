@@ -1,0 +1,42 @@
+# socscope_rev waivers (check_socscope_overlay_rev.py --waivers).
+#
+# Each line: <rm_name>  # reason / owner / how it gets burned down
+#
+# A waiver lets ONE overlay carry `"socscope_rev": "unknown"` without failing the
+# gate. It is not a fix: the fix is a rebuild, which stamps the real sha. A waiver
+# with no reason is ignored (the gate treats the overlay as unwaived), and a
+# `-dirty` rev can never be waived -- a build from a dirty tree is unreproducible.
+#
+# Removing a line must make the gate go red until that overlay is rebuilt.
+#
+# ---------------------------------------------------------------------------
+# EMPTY, and the way the last entry went is worth keeping.
+#
+# `socscope` was waived from 2026-09-09 as "built 2026-08-10 before provenance was
+# recorded; the revision cannot be recovered -- no sha is guessed". BOTH halves of
+# that turned out to be wrong, in opposite directions:
+#
+#   IT WAS RECOVERABLE. All four copies of rm_socscope_synth.dcp in the repo are
+#   byte-identical, the shipped overlay/socscope/*.bin are byte-identical to
+#   build_mint/prod's, and the OOC run that produced that checkpoint left a log in
+#   fpga/dfx/rms/rm_socscope/build/ (23:17:49 -> 23:19:37 on 2026-08-06).
+#   (fielded/0xA8C1C535/mint.json says "no synth.log for rm_socscope exists in any
+#   tree". One did.)
+#
+#   AND IT WAS WORSE THAN UNKNOWN. The checkpoint is dated BEFORE both commits that
+#   describe how it was built: SoCScope 9a734d5, which adds hw/rtl/socscope_selftest.f,
+#   at 23:28:53, and this repo's 93d6815 ("rm_socscope partial rebuilt"), which makes
+#   filelist.tcl read that file and rewrites the overlay manifest, at 23:33:45.
+#   filelist.tcl ERRORS when socscope_selftest.f is missing, so the file was on disk at
+#   23:19 and in neither tree's HEAD. The tree was DIRTY; the honest record is
+#   `5d68932-dirty`, which this gate refuses categorically and which may never be
+#   waived: a build from a dirty tree is unreproducible.
+#
+# So the waiver could not be renewed with a real sha -- only retired by a rebuild,
+# which is what happened (see docs/SOCSCOPE_INTEGRATION.md, "What the shipped overlay
+# was really built from"). The overlay now carries a provenance.json written by
+# ooc_synth.tcl inside the process that read the files, and the gate holds the
+# manifest to it.
+#
+# A future waiver here is still legal, still needs a reason, and should still be
+# read as "this overlay has not been rebuilt yet" rather than as a fix.

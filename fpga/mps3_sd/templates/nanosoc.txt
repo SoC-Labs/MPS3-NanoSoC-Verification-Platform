@@ -1,0 +1,73 @@
+BOARD: HBI0309
+TITLE: AN522 application note configuration file
+;
+; nanoSoC FPGA application-note config for the mps3-nanosoc-platform.
+; AN522-derived, recovered from a real deployment SD and hardware-confirmed to
+; SD-boot on HBI0309C (Kintex UltraScale XCKU115). This is OUR nanoSoC config —
+; it deliberately carries no Arm AN543 content.
+;
+; This file is board-revision independent (BOARD: HBI0309 with no A/B/C suffix,
+; matching the Arm application-note convention). One nanosoc.txt serves A/B/C.
+;
+; Keep the AN522 TITLE intact — the MCC + Arm tooling key off it. The MCC
+; accepts almost any values silently; wrong ones fail at the I/O pads with NO
+; error message. Do not change fields unless you know why.
+
+[FPGAS]
+TOTALFPGAS: 1              ;Total number of FPGAs
+F0FILE: nanosoc.bit        ;FPGA0 filename — assemble_sd.sh copies your full .bit here
+F0MODE: FPGA               ;FPGA0 programming mode
+
+[OSCCLKS]
+TOTALOSCCLKS: 7
+; OSC0 = LAN9220 Ethernet PHY reference clock. It MUST be 25.0 MHz.
+; A previous nanoSoC SD shipped OSC0: 24.0 — a ~4% error on the PHY reference
+; that breaks Ethernet. The working reference (Arm AN543) also uses 25.0 here.
+OSC0: 25.0                 ;OSC0 - LAN9220 Ethernet PHY reference (25.0 MHz — REQUIRED)
+OSC1: 50.0                 ;OSC1 - ACLK  <-- platform board clock (OSCCLK[1], pad AK16)
+OSC2: 50.0                 ;OSC2 - MCLK
+OSC3: 50.0                 ;OSC3 - GPUCLK
+OSC4: 24.576              ;OSC4 - AUDCLK
+OSC5: 23.75              ;OSC5 - HDLCDCLK (MCC overrides this value)
+OSC6: 100.0              ;OSC6 - GTX clock (DDR)
+
+[HARDWARE CONTROL]
+ASSERTNPOR: TRUE          ;External resets assert nPOR
+LEGACYRST: FALSE          ;Legacy CB_nPOR/CB_nRST reset mode
+CPUWAIT: 0xFFFFFFFF        ;CPUWAIT value, set to 0xFFFFFFFF when using CB_nRST
+
+[PERIPHERAL SUPPORT]
+; --- LAN9220 Ethernet MCC sideband toggle -----------------------------------
+; The working Ethernet reference (Arm AN543) sets FPGA_SMB and FPGA_LAN TRUE so
+; the MCC probes / brings up the LAN9220 over its SMB (+ SCC) sideband. These
+; MAY be needed for the LAN9220 SMB path. They are INDEPENDENT of the OSC0:25.0
+; PHY-clock fix above (that fix stands on its own).
+;   * If the board fails to program with these TRUE (MCC hangs on SMB), set
+;     both to FALSE — the SoC + Ethernet datapath still work off OSC0.
+;   * assemble_sd.sh: run with `ETH_SMB=0 ./assemble_sd.sh ...` to stamp FALSE.
+FPGA_SMB: TRUE            ;SMB interface (MCC_SMC<>FPGA_SMB)
+FPGA_LAN: TRUE            ;LAN9220 Ethernet interface present
+LANBASE: 0x04400000       ;LAN9220 base address (OUR nanoSoC memory map)
+; ----------------------------------------------------------------------------
+FPGA_SCC: FALSE           ;SCC interface
+SCCREG:  0x04300000       ;SCC registers base address
+FPGA_DDR: FALSE           ;DDR interface
+DDRBASE: 0x0420F000       ;DDR I2C register address
+FPGA_SYSREG: FALSE        ;System register interface
+FPGAREG: 0x04302000       ;System registers base address
+FPGA_REMAP: FALSE         ;REMAP interface
+REMAPREG: 0x05000000      ;REMAP register address
+REMAP: BRAM               ;REMAP boot device BRAM/DDR/QSPI
+FPGA_HDMI: FALSE          ;HDMI interface
+HDMIBASE: 0x0420E000      ;HDMI I2C register address
+FPGA_RTC: FALSE           ;RTC PL031 interface
+RTCBASE: 0x0430B000       ;RTC PL031 base address
+FPGA_QSPI: FALSE          ;QSPI interface
+QSPIBASE: 0x04601000      ;QSPI controller base address
+QSPIDATA: 0x02000000      ;QSPI data address
+XIPBASE: 0x04600000       ;QSPI XIP controller base address
+QSPISCC: 0x08             ;QSPI SCC register
+
+[SCC REGISTERS]
+TOTALSYSCONS: 0           ;Total number of SYSCON registers defined
+SYSCON: 0x000 0x00000001  ;

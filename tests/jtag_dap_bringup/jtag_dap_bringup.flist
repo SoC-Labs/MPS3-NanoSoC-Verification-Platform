@@ -1,0 +1,41 @@
+//-----------------------------------------------------------------------------
+// jtag_dap_bringup.flist — SWJ-DP serial-decode + AHB-AP + M0 debug path
+// A joint work commissioned on behalf of SoC Labs, under Arm Academic Access license.
+//
+// Copyright (C) 2026, SoC Labs (www.soclabs.org)
+//-----------------------------------------------------------------------------
+// P2 SIM GATE (SOC400_BASELINE_INTEGRATION.md). References the committed,
+// multicore-proven SoC-400 RTL and the Arm Cortex-M0-QS IP IN PLACE by
+// absolute path (via env vars) — nothing is copied. The Arm cells under
+// $(ARM_IP_LIBRARY_PATH) are read-only vendor collateral (global rule);
+// they are sourced by the two SoC-400 vendor flists below.
+//
+// Required env (see the Makefile; NANOSOC_MULTICORE_HOME has NO default --
+// a default naming one workstation's home directory is invisible on that
+// machine and silently reads the wrong tree on every other one):
+//   NANOSOC_MULTICORE_HOME             canonical SoC-400 source tree
+//   SOCLABS_CORESIGHT_SOC400_TECH_DIR  the shared SoC-400 tech block
+//   SOCLABS_SLCOREM0_TECH_DIR          slcorem0 wrapper + Cortex-M0-QS IP flists
+//   ARM_IP_LIBRARY_PATH                vendor IP root (cxdapswjdp/cxdapahbap/M0)
+//-----------------------------------------------------------------------------
+
+// SoC-400 vendor cells: AHB-AP (cxdapahbap) + SWJ-DP (cxdapswjdp), sourced
+// in place from $(ARM_IP_LIBRARY_PATH).
+-f $(NANOSOC_MULTICORE_HOME)/coresight_soc400/flist/coresight_soc400_ahbap.flist
+-f $(NANOSOC_MULTICORE_HOME)/coresight_soc400/flist/coresight_soc400_swjdp.flist
+
+// SoC Labs SoC-400 wrapper RTL, from the tech block's OWN flist.
+//
+// It used to be six hand-listed paths under
+// $(NANOSOC_MULTICORE_HOME)/coresight_soc400/rtl/. That directory no longer
+// exists: the multicore tree moved the wrappers into the shared tech block, a
+// nested submodule at $(SOCLABS_CORESIGHT_SOC400_TECH_DIR), which ships this
+// flist. Quoting the flist rather than the six paths is what stops the same rot
+// recurring -- nanosoc_dap_ss.v gained an instance of nanosoc_dap_ahb_timeout.v
+// in the move, and a hand-listed six would have been short one module.
+// nanosoc_dbg_ahb_bridge.v in there is the UNCONDITIONAL-CAPTURE version (NOT
+// the micropython poll-gated one), which test_cpuid_anti_bleed depends on.
+-f $(SOCLABS_CORESIGHT_SOC400_TECH_DIR)/flist/coresight_soc400_swjdap.flist
+
+// slcorem0 wrapper + Cortex-M0-QS IP (pulls in $(ARM_IP_LIBRARY_PATH) M0 files).
+-f $(SOCLABS_SLCOREM0_TECH_DIR)/flist/slcorem0_qs.flist

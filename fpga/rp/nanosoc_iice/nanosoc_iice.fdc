@@ -1,0 +1,254 @@
+################################################################################
+# nanosoc_iice.fdc — Synplify FDC translation of fpga/rp/nanosoc/nanosoc_ooc.xdc
+#
+# WHY A SEPARATE FILE AT ALL
+# --------------------------
+# Synplify does NOT accept XDC. There is no `sdc2fdc` in this install either —
+# $SYNPLIFY_HOME/bin ships only pdc2sdc and qsf2sdc — so this is a hand
+# translation, kept line-for-line traceable to its XDC source. The reverse-
+# direction precedent is
+#   nanosoc-ethernet-chiplet/fpga/haps-sx/scripts/fdc_to_xdc.py
+# and the dialect used here matches the working, in-use
+#   nanosoc-ethernet-chiplet/fpga/haps-sx/constraints/nanosoc_eth_chiplet_haps_sx.fdc
+# which uses the SDC-standard subset (create_clock / set_clock_groups /
+# set_false_path / get_ports / get_clocks) rather than the legacy Synplify
+# spellings (define_clock / define_false_path / {p:port}). Both are accepted;
+# the SDC subset keeps this file diffable against the XDC.
+#
+# SCOPE. This constrains rp_nanosoc_iice_core — the Synplify/Identify synthesis
+# top, whose port list is byte-identical to rp_nanosoc_wrapper's (the 35
+# contract ports of docs/contracts/partition-pins.md). So every constraint
+# below has exactly the same meaning it has in the Vivado baseline.
+#
+# WHAT IS NOT HERE, DELIBERATELY:
+#   * identify_jtag_tck. The Identify instrumentor ADDS that port and brings its
+#     own constraint with it — $SYNPLIFY_HOME/lib/share/synthesis/syn.sdc:
+#       define_clock {identify_jtag_tck} -period 250.0 -clockgroup identify_jtag_group
+#     (250 ns = 4 MHz). Declaring it here too would create two competing
+#     definitions of the same clock. Note the soft TAP does NOT need a global
+#     clock buffer because `device skewfree 1` builds master/slave flops on the
+#     JTAG chain instead — mandatory, since the RP pblock has ZERO BUFG sites.
+#   * pin locations / I/O standards. This is an out-of-context, pad-less
+#     netlist (`set_option -disable_io_insertion 1`); the static shell owns
+#     every pad. Nothing in this file may ever place a pin.
+#
+# UNMATCHED OBJECTS. rp_nanosoc_wrapper ties several boundary ports off inert
+# (phy_rmii_*, mdio_*, swo, dut_lockup, irq_out), so a port can optimise to a
+# constant and vanish. The XDC handles that with `get_ports -quiet`; Synplify
+# has no -quiet, and reports an unmatched constraint object as a WARNING (@W),
+# not an error. That is the intended behaviour here — a missing port is not a
+# failure. Do not "fix" the warnings by deleting the constraints; they must
+# stay so that a future wrapper which DOES drive those ports is still
+# constrained.
+#
+# Target: Synplify Premier 2022.09-SP2, XCKU115 / FLVB1760 / -1-c.
+################################################################################
+
+################################################################################
+# GLOBAL BUFFER INFERENCE — the RP pblock has ZERO BUFG sites, so this must be
+# OFF for the whole design. Not an optimisation: an inferred global buffer
+# anywhere inside the RM is unplaceable.
+#
+# MEASURED FAILURE, 2026-07-29, on the real 240-source DUT. `make synth` was
+# clean and `make dcp` linked 21,094 cells, then the no-BUFG gate in
+# ooc_synth_synplify.tcl fired on TWO cells:
+#
+#   u_rm/u_nanosoc/u_qspi_flash_0/u_top_ahb_qspi/u_qspi_clock_div/
+#       partial_QSPI_SCLK_i_cb                      <- divided QSPI clock
+#   u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/u_core_prmu/u_rstctrl/
+#       u_core_hresetn_sync/rst_sync2_n_buf         <- reset synchroniser
+#
+# Both are DESIGN nets. Nothing in the .idc is responsible — the .idc had both
+# `device xilinxinsertbufg 0` and `device skewfree 1` (make synth refuses to run
+# without them). This is Synplify's own automatic promotion of high-fanout
+# clock AND reset nets onto global buffers; Vivado does not do it, which is why
+# the fpga/rp/nanosoc/ (Vivado) baseline never hit this.
+#
+# THE CONTROL, confirmed in the installed documentation before use — no guessed
+# flag names:
+#
+#   syn_noclockbuf   "Turns off automatic clock buffer usage."
+#                    fpga_attribute_reference.pdf p.415-418:
+#                      * Vendor Xilinx: technology "all"
+#                      * Values: 0/false = ON (default), 1/true = OFF
+#                      * "Global Support: Yes", Object: module/architecture
+#                      * FDC syntax, verbatim from p.416:
+#                            define_attribute {clock_port} syn_noclockbuf {0|1}
+#                            define_global_attribute syn_noclockbuf {0|1}
+#                    fpga_reference.pdf p.623 restates the scope: "Turns off
+#                    automatic clock buffers for ENTIRE MODULES OR NETS, or just
+#                    for specific input ports."
+#
+# `define_global_attribute` is a documented FDC command, not an SDC-only one:
+# fpga_reference.pdf p.150 — "This FDC file includes both timing constraints and
+# non-timing constraints in a single file ... Non-timing (or design constraints)
+# ... include constraints such as define_attribute, define_io_standard".
+#
+# The GLOBAL form is used deliberately, in preference to naming the two nets:
+# this RM can never host a BUFG at all, so "never infer one, anywhere" is the
+# actual requirement, and a per-net list would silently miss the next net that
+# crosses the fanout threshold when the DUT changes.
+#
+# Consistency check that this is the right lever: the Identify instrumentor
+# itself emits `wire identify_clk /* syn_noclockbuf=1 */` on its own clock net
+# when `device xilinxinsertbufg 0` is set. Same attribute, same purpose.
+#
+# Side effect, and it is the DESIRED one: dut_clk (the highest-fanout clock in
+# the RM) also loses any buffer. Correct — dut_clk arrives as a partition pin
+# ALREADY buffered by the static shell's clk_wiz_dut, and the Vivado baseline's
+# util_rm_nanosoc.rpt section 8 (CLOCK) is an empty table, i.e. the baseline RM
+# contains zero BUFGs too. Suppressing inference here makes the Synplify RM
+# match the Vivado RM rather than diverging from it.
+#
+# Deliberately NOT used: `define_global_attribute syn_global_buffers {0}`.
+# syn_global_buffers is real, Xilinx-supported and global
+# (fpga_attribute_reference.pdf p.299-300: "prevent the synthesis tool from
+# inferring clock buffers"), but the docs say only "for Xilinx designs, the
+# value varies with the technology" and specify a floor of 6 for Microchip —
+# a value of 0 is not documented as valid for Xilinx. syn_noclockbuf is
+# unambiguous, so it is used alone; adding a second, semi-documented knob in the
+# same run would have made the result unattributable.
+#
+# `set_option -globalthreshold` is NOT the answer either: it is Microchip-only
+# (fpga_reference.pdf Appendix D, p.795).
+#
+# PER-NET FALLBACK, if the global attribute is ever insufficient. Note the FDC
+# object syntax: `n:` prefix for a net and `.` (NOT `/`) as the hierarchy
+# separator — the convention Synplify's own xilinx_builtin.sdc uses
+# (`n:comm_block_INST.tck`). Note also that Vivado shows the buffer Synplify
+# ADDED (`..._cb`, `..._buf`); the net to constrain is the one WITHOUT that
+# suffix, and the `u_core/` prefix Vivado prints does not exist in Synplify's
+# view (Synplify's top is rp_nanosoc_iice_core, so paths start at u_rm).
+#
+# define_attribute {n:u_rm.u_nanosoc.u_qspi_flash_0.u_top_ahb_qspi.u_qspi_clock_div.partial_QSPI_SCLK} syn_noclockbuf {1}
+# define_attribute {n:u_rm.u_nanosoc.u_ss_cpu.u_cpu_0.u_core_prmu.u_rstctrl.u_core_hresetn_sync.rst_sync2_n} syn_noclockbuf {1}
+################################################################################
+define_global_attribute syn_noclockbuf {1}
+
+################################################################################
+# dut_clk — the DUT system clock (partition-pins.md "Clocks & resets").
+# Carries the static's clk_out1_shell_bd_clk_wiz_dut_0 (DRP MMCM output).
+# Period/waveform copied BYTE-FOR-BYTE from docs/contracts/partition-timing.md
+# via nanosoc_ooc.xdc:40 — 20.000 ns / {0.000 10.000} / 50 MHz. If the shell
+# retunes clk_wiz_dut, or firmware DRP-reprograms it, update partition-timing.md,
+# nanosoc_ooc.xdc AND this line together.
+#
+# Everything real in this RM runs on dut_clk: the whole nanosoc core
+# (sys_clk = dut_clk) and the uart_axis_shim (clk = dut_clk).
+#
+# The IICE's SAMPLE clock is this clock. Identify requires the sample clock to
+# be a global clock resource sourced from a BUFG; dut_clk arrives as a partition
+# pin already buffered by the static shell's clk_wiz_dut, so it IS on a global
+# net — but the BUFG is OUTSIDE the RP. Whether Identify accepts that rather
+# than demanding a local buffer is UNVERIFIED (plan §4 "Check"). If it inserts
+# one anyway the build fails at Vivado placement, not here: there is no BUFG
+# site in the pblock.
+################################################################################
+create_clock -name {dut_clk} -period 20.000 -waveform {0.000 10.000} \
+    [get_ports {dut_clk}]
+
+################################################################################
+# jtag_tck — the DUT debug clock (fpga/shell/boundary.yaml group `jtag`), and
+# in the INSTRUMENTED build ALSO the Identify soft TAP's TCK: the two TAPs are
+# daisy-chained on this one wire-set, so they share TCK exactly (see
+# rp_nanosoc_iice_shim.sv, docs/planning/IICE_JTAG_CHAIN.md).
+#
+# WAS `swd_clk` until the 2026-09-10 rebase. The swd_* group does not exist in
+# the fielded boundary (mint 0xA8C1C535); the shell's swd_bb was replaced by
+# jtag_bb @ 0x44A7_0000 at the A6 SWD->JTAG cutover.
+#
+# In the static this is a firmware bit-banged CSR pin (JTAGBB.DRIVE[0],
+# shell-regmap.md), NOT a clk_wiz output — it has NO create_clock in the static
+# and is DC-slow. 100 ns (10 MHz) is a generous upper bound on any real
+# firmware bit-bang rate and is deliberately TIGHTER than Identify's own 250 ns
+# on identify_jtag_tck, so this file can never be the reason a JTAG path is
+# under-constrained. It is NOT a shell contract value.
+#
+# It ALSO covers the one path the chain creates that neither TAP owns alone:
+# Identify's TDO (launched on a jtag_tck edge) into the SWJ-DP's TDI (captured
+# on a jtag_tck edge). That splice lives in the SHIM, above this synthesis top,
+# and is timed by nanosoc_ooc.xdc's identically-valued `create_clock -name
+# jtag_tck -period 100.000` at checkpoint time. Both files must keep the same
+# period or the chain path is analysed at two different rates in two flows.
+#
+# OOC-ONLY: this clock has no static counterpart, so it lives here and in no
+# _rm.xdc (partition-timing.md O2). Mirrors nanosoc_ooc.xdc:107.
+################################################################################
+create_clock -name {jtag_tck} -period 100.000 [get_ports {jtag_tck}]
+
+################################################################################
+# SWJ-DP (jtag_tck) vs core (dut_clk) is an internal async crossing owned by the
+# CoreSight DAP's own synchronizers. Declare it async so the OOC run does not
+# time a false jtag_tck<->dut_clk path. From nanosoc_ooc.xdc:110-114.
+#
+# Synplify note: clocks in DIFFERENT -clockgroups are treated as asynchronous
+# by default, so this set_clock_groups is belt-and-braces over the automatic
+# behaviour rather than the only thing preventing a false path. Keeping it
+# explicit means the FDC says the same thing the XDC says.
+################################################################################
+set_clock_groups -asynchronous \
+    -group [get_clocks {dut_clk}] \
+    -group [get_clocks {jtag_tck}]
+
+################################################################################
+# Async partition-pin DATA ports — false-pathed for standalone OOC analysis.
+# partition-pins.md "Clock/reset domain rule": every boundary crossing is CDC'd
+# on the STATIC side (uart_bridge async FIFOs, board_gpio synchronizers, the
+# jtag_bb bit-banger, the VPHY). From this RM's view they arrive already-safe,
+# so timing them against dut_clk standalone would model a crossing the static
+# already owns. From nanosoc_ooc.xdc:117-149.
+################################################################################
+# Async control inputs: the three resets (async-assert, deassert synchronized
+# shell-side; this RM does not re-sync).
+#
+# jtag_tdi/jtag_tms/jtag_tdo are NOT in this list and must not be: they are
+# real 1149.1 serial legs, launched and captured on jtag_tck, and jtag_tck has
+# a create_clock above. False-pathing them here would leave the SWJ-DP's own
+# TAP shift registers unconstrained in the Synplify run — which is exactly the
+# analysis this chain most needs, because the splice at the shim level makes
+# jtag_tdi an INTERNAL chain hop rather than a shell-driven pin in the
+# instrumented build.
+#
+# (nanosoc_ooc.xdc:133 DOES false-path jtag_tdi, at the Vivado/checkpoint level
+# and for the SINGLE-TAP baseline, where the port really is fed only by the
+# shell's bit-banger. That file is fpga/rp/nanosoc's, is applied additively
+# after synth_design, and is deliberately not edited from here — the difference
+# is recorded rather than papered over.)
+set_false_path -from [get_ports {dut_resetn rp_resetn dbg_resetn}]
+
+# Console AXIS byte stream (uart_bridge async FIFOs, static side) —
+# host->DUT in, DUT->host out.
+set_false_path -from [get_ports {uart_rx_tdata[*] uart_rx_tvalid uart_tx_tready}]
+set_false_path -to   [get_ports {uart_tx_tdata[*] uart_tx_tvalid uart_rx_tready swo}]
+
+# Board-GPIO passthrough (board_gpio 2-FF synchronizers, static side).
+#
+# The old `IICE_OWNS_SWD=0` note that used to sit here is GONE with the design
+# it described: the shim no longer muxes TAP ownership onto a spare GPIO bit,
+# because a daisy chain makes both TAPs reachable at once and there is nothing
+# left to arbitrate. dut_gpio_i is now purely the DUT's board-port input.
+set_false_path -from [get_ports {dut_gpio_i[*]}]
+set_false_path -to   [get_ports {dut_gpio_o[*] dut_gpio_oe[*]}]
+
+# Ethernet group — structurally tied off inert in this RM (no MAC), but
+# false-path defensively in case synthesis keeps any port.
+set_false_path -from [get_ports {phy_rmii_ref_clk phy_rmii_crs_dv phy_rmii_rxd[*] mdio_i}]
+set_false_path -to   [get_ports {phy_rmii_txd[*] phy_rmii_tx_en mdc mdio_o mdio_oe}]
+
+# Status / misc telemetry to the shell (rm_id is a constant; dut_lockup/irq_out
+# tied off in this RM).
+set_false_path -to   [get_ports {rm_id[*] dut_lockup irq_out}]
+
+################################################################################
+# NOT TRANSLATED from nanosoc_ooc.xdc — and why
+#
+# The 2026-10 ILA mint's dbgbscan block (2x create_clock dbg_bscan_tck/drck at
+# 80 ns, 1x set_clock_groups async_dbg_bscan, 2x set_false_path on the unused
+# BSCAN legs). The core passes those legs to rp_nanosoc_wrapper, which ignores
+# them and ties dbg_bscan_tdo low, so Synplify sees no logic on them and needs
+# no constraint. Everything else in nanosoc_ooc.xdc (2x create_clock, 1x
+# set_clock_groups, 7x set_false_path) is above. The QSPI group
+# (qspi_sclk/csn/io_o/io_oe/io_i) has NO constraint in the XDC either — it is
+# the documented non-CDC source-synchronous exception (partition-pins.md v0.2)
+# and is constrained on the STATIC side, so this file must not touch it.
+################################################################################

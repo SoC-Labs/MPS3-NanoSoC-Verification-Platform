@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "static_id": "0x72BB0A36",
+  "rm_id": "0x0100000A",
+  "rm_name": "nanosoc_ila",
+  "ip_class": "arm-aaa",
+  "clearing": {
+    "file": "nanosoc_ila_clear.bin",
+    "len": 190820,
+    "crc32": "0x182e32c5"
+  },
+  "partial": {
+    "file": "nanosoc_ila.bin",
+    "len": 2526052,
+    "crc32": "0xa31f2c5e"
+  },
+  "built": "2026-09-23",
+  "vivado": "2024.1",
+  "ltx": "nanosoc_ila.ltx",
+  "ltx_crc32": "0x4032f998",
+  "ltx_uuids": [
+    "B18B3F67433359B4A1D657D53DA82FC9"
+  ],
+  "static_usercode": "0xC8551081"
+}

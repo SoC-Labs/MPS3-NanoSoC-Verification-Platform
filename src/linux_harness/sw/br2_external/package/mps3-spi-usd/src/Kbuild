@@ -1,0 +1,2 @@
+# spi-usd.ko — SPI controller for the MPS3 shell's usd_spi (user microSD).
+obj-m := spi-usd.o

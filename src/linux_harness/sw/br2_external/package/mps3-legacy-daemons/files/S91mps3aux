@@ -1,0 +1,70 @@
+#!/bin/sh
+#
+# S91mps3aux — start the aux-service daemons (M4), AFTER S90mps3d.
+#   mps3-xvcd    : TCP 2542       XVC v1.0 -> Debug Bridge (UIO "dbgbr")
+#   mps3-uartbrd : TCP 6930/1/2   UARTBR three-stream byte relay
+#
+# NO DUT bit-bang debug daemon starts here any more. The SWD->JTAG cutover
+# replaced the SWDBB block with jtag_bb at the SAME page, so mps3-swdd is
+# retired (daemons/legacy/, not installed) and its JTAG successor is not
+# written yet -- docs/planning/LINUX_FORK_JTAG_MIGRATION.md "the userspace
+# half". Starting the SWD daemon against jtag_bb would not fail: it would
+# drive a JTAG TAP with SWD sequences.
+#
+# Each daemon starts ONLY if its UIO block is present (matched by
+# /sys/class/uio/uioN/name == the DT node name). On a QEMU -M virt smoke
+# image none of the blocks exist and none of these start — deliberate:
+# the daemons refuse to serve hardware that is not there (never probe a
+# page blind; under the MBV a DECERR is a real S-mode access fault).
+#
+# All three take the swap gate from the default /run/mps3/swap_gate —
+# created by the swap engine owner before decouple, removed after
+# release+verify (see sw/AUX_SERVICES.md "Cross-service gating").
+
+has_uio() {
+    for f in /sys/class/uio/uio*/name; do
+        [ -f "$f" ] || return 1
+        [ "$(cat "$f" 2>/dev/null)" = "$1" ] && return 0
+    done
+    return 1
+}
+
+start_one() {
+    name="$1"; shift
+    printf 'Starting %s: ' "$name"
+    start-stop-daemon -S -b -m -p "/var/run/$name.pid" \
+        -x "/usr/sbin/$name" -- "$@"
+    [ $? -eq 0 ] && echo "OK" || echo "FAIL"
+}
+
+start() {
+    mkdir -p /run/mps3
+    if has_uio dbgbr; then
+        start_one mps3-xvcd
+    else
+        echo "mps3-xvcd: UIO 'dbgbr' absent, not started"
+    fi
+    if has_uio uartbr; then
+        start_one mps3-uartbrd
+    else
+        echo "mps3-uartbrd: UIO 'uartbr' absent, not started"
+    fi
+}
+
+stop() {
+    for d in mps3-xvcd mps3-uartbrd; do
+        [ -f "/var/run/$d.pid" ] || continue
+        printf 'Stopping %s: ' "$d"
+        start-stop-daemon -K -q -p "/var/run/$d.pid"
+        [ $? -eq 0 ] && echo "OK" || echo "FAIL"
+        rm -f "/var/run/$d.pid"
+    done
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
+exit 0

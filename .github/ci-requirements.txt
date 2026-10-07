@@ -1,0 +1,26 @@
+# Pinned Python deps for the hosted CI board-free gate (.github/workflows/ci.yml,
+# `make check-ci`). These mirror the deployment box (python 3.8).
+#
+# pyverify and socket_harness are imported via PYTHONPATH, NOT pip-installed, so
+# their `requires-python = ">=3.10"` metadata never blocks the 3.8 box that
+# actually runs the gate -- only their test-time deps are listed here.
+#
+#   pytest   -- the test runner for stages 3-4.
+#   pydantic -- host/pyverify/tests/test_tender_plugin.py needs it (the test
+#               importorskips when absent, but installing it exercises the
+#               tender-plugin path rather than skipping it).
+#   cocotb   -- IMPORT-ONLY, NO simulator. tests/common/regmap.py imports cocotb
+#               at top level, so two pure-logic tests (test_regmap,
+#               test_swap_sequence) fail COLLECTION without it. Pinned to the
+#               box's 1.7.2. The @cocotb.test() benches themselves are excluded
+#               by tests/conftest.py and run only on the self-hosted full gate
+#               (make check SIM=vcs), which has a real simulator.
+#   pyyaml   -- tests/identify_iice (manifest.py, provenance.py) reads YAML
+#               manifests with PyYAML when importable and a strict-subset
+#               fallback parser otherwise; the fallback does NOT parse the
+#               test fixtures (run 34474922254: 7 failures + 42 errors on the
+#               hosted runner, green on the box, which has PyYAML 6.0.1).
+pytest>=7,<9
+pyyaml>=6,<7
+pydantic>=2,<3
+cocotb==1.7.2

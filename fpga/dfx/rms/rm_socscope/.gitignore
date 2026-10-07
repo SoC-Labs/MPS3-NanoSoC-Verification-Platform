@@ -1,0 +1,5 @@
+# OOC synthesis outputs: a 40 MB checkpoint and its reports, reproducible from
+# ooc_synth.tcl in a couple of minutes. The RESULTS that matter are quoted in
+# rm_list.tcl and in SoCScope's docs/STATUS.md, where they can be read without
+# opening Vivado.
+build/

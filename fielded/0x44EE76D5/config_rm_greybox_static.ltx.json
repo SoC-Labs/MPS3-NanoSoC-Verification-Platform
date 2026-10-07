@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "kind": "static",
+  "ref_key": "rm_greybox",
+  "shell_cpu": "mbv",
+  "ltx": "config_rm_greybox_static.ltx",
+  "ltx_crc32": "0xce2a01f0",
+  "ltx_len": 851,
+  "ltx_sha256": "a1be5b9b55023398d0be03e2a34cf3d65286e93dc9fe8c32cc0f0f4983522e54",
+  "report": "debug_core_rm_greybox_static.rpt",
+  "static_id": "0x44EE76D5",
+  "static_bit": "config_rm_greybox.bit",
+  "static_bit_sha256": "9d1d4bd77278e24929342639ce840a89d746eb2d7bb3b60eb076015f316ba3c5",
+  "static_usercode": "0xFB1F8C76",
+  "uuids": [
+    "35988F4F3335580E8082F08D4B627CD0"
+  ],
+  "cores": [
+    {
+      "name": "u_shell/shell_bd_i/mig_dbg_hub/inst/xsdbm",
+      "type": "XSDB_V3"
+    },
+    {
+      "name": "u_shell/shell_bd_i/ddr4_0",
+      "type": "XSDBS_V2",
+      "ipName": "DDR4_SDRAM",
+      "uuid": "35988F4F3335580E8082F08D4B627CD0"
+    }
+  ],
+  "note": "the STATIC's debug cores; valid whatever RM is loaded (the static is locked). The flashable base carries the same UserID (stage0_bake.py / the MB bake verify it), which is what binds this file to it."
+}

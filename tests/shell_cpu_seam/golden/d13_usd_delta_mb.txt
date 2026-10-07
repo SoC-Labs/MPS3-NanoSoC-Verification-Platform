@@ -1,0 +1,275 @@
+# The ONLY deliberate change to the SHELL_CPU=mb block design since the fielded
+# baseline (eafe787, the 2026-10 ILA mint's shell_bd.tcl): D13 -- usd_spi_0
+# (USD, the user-microSD SPI master) replaces the pad-less axi_quad_spi_0
+# (OVLSTORE) on 0x44A4_0000 and on interconnect port M03.
+#
+# Format: tests/shell_cpu_seam/seam_dump.py `delta <baseline> <seam_mb>` -- every
+# dump line with its ancestry (`CELL /x > PIN y > CONFIG.k=v`), NET/INET exploded
+# per member, `-` = only in the baseline, `+` = only in this tree, sorted.
+# Dumps: Vivado 2024.1, SHELL_CPU=mb SHELL_TOUCH=1 SHELL_REALPHY=0,
+# fpga/shell/tools/shell_bd_dump_run.tcl. Checked by run_seam_gate.sh step 2
+# (`compare --expect-delta`, exact); every line is held to the cell swap by
+# test_shell_cpu_seam.py (test_d13_delta_is_only_the_usd_cell_swap).
+#
+# What it says, in words:
+#   - axi_quad_spi_0: the whole cell -- VLNV, every CONFIG, every pin, its
+#     AXI_LITE/SPI_0 interfaces, its three clock/reset net memberships
+#     (ext_spi_clk, s_axi_aclk, s_axi_aresetn), its M03 intf net end and its
+#     0x44A40000/64K segment -- is gone.
+#   + usd_spi_0 (soclabs.org:user:usd_spi:1.0, C_S_AXI_ADDR_WIDTH=32,
+#     DEBOUNCE_CYCLES=1000000 default): the cell, its s_axi on M03, s_axi_aclk /
+#     s_axi_aresetn on the same shell_clk / peripheral_aresetn nets, the same
+#     0x44A40000/64K segment, and eight new scalar BD ports + nets (usd_clk_o/oe,
+#     usd_cmd_o/oe, usd_dat0_i, usd_dat3_o/oe, usd_ncd_i).
+#   ~ M03 only, propagated from the new slave's interface: usd_spi's s_axi has
+#     HAS_PROT=1, so the M03 arprot/awprot pins of axi_interconnect_0 and
+#     m03_couplers become [2:0] vectors (were unsized/unconnected); and it
+#     declares NUM_READ/WRITE_OUTSTANDING=1, so tier2_xbar_0's M03_AXI follows
+#     (2 -> 1). No other master port, cell, CONFIG, net name or address moved.
+- ASEG /axi_quad_spi_0/AXI_LITE/Reg offset= range=0x00001000 excluded= slave=/microblaze_0/Data/SEG_axi_quad_spi_0_Reg
+- ASEG /microblaze_0/Data/SEG_axi_quad_spi_0_Reg offset=0x44A40000 range=0x00010000 excluded= slave=/axi_quad_spi_0/AXI_LITE/Reg
+- CELL /axi_interconnect_0 > PIN M03_AXI_arprot dir=O type=undef left= right= net=-
+- CELL /axi_interconnect_0 > PIN M03_AXI_awprot dir=O type=undef left= right= net=-
+- CELL /axi_interconnect_0/m03_couplers > PIN M_AXI_arprot dir=O type=undef left= right= net=-
+- CELL /axi_interconnect_0/m03_couplers > PIN M_AXI_awprot dir=O type=undef left= right= net=-
+- CELL /axi_interconnect_0/m03_couplers > PIN S_AXI_arprot dir=I type=undef left= right= net=-
+- CELL /axi_interconnect_0/m03_couplers > PIN S_AXI_awprot dir=I type=undef left= right= net=-
+- CELL /axi_interconnect_0/tier2_xbar_0 > IPIN M03_AXI > CONFIG.NUM_READ_OUTSTANDING=2
+- CELL /axi_interconnect_0/tier2_xbar_0 > IPIN M03_AXI > CONFIG.NUM_WRITE_OUTSTANDING=2
+- CELL /axi_quad_spi_0 > CONFIG.Async_Clk=0
+- CELL /axi_quad_spi_0 > CONFIG.C_BYTE_LEVEL_INTERRUPT_EN=0
+- CELL /axi_quad_spi_0 > CONFIG.C_DUAL_QUAD_MODE=0
+- CELL /axi_quad_spi_0 > CONFIG.C_FAMILY=kintexu
+- CELL /axi_quad_spi_0 > CONFIG.C_FIFO_DEPTH=16
+- CELL /axi_quad_spi_0 > CONFIG.C_INSTANCE=axi_quad_spi_inst
+- CELL /axi_quad_spi_0 > CONFIG.C_NUM_SS_BITS=1
+- CELL /axi_quad_spi_0 > CONFIG.C_NUM_TRANSFER_BITS=8
+- CELL /axi_quad_spi_0 > CONFIG.C_SCK_RATIO1=1
+- CELL /axi_quad_spi_0 > CONFIG.C_SCK_RATIO=16
+- CELL /axi_quad_spi_0 > CONFIG.C_SELECT_XPM=0
+- CELL /axi_quad_spi_0 > CONFIG.C_SHARED_STARTUP=0
+- CELL /axi_quad_spi_0 > CONFIG.C_SPI_MEMORY=0
+- CELL /axi_quad_spi_0 > CONFIG.C_SPI_MEM_ADDR_BITS=24
+- CELL /axi_quad_spi_0 > CONFIG.C_SPI_MODE=0
+- CELL /axi_quad_spi_0 > CONFIG.C_SUB_FAMILY=kintexu
+- CELL /axi_quad_spi_0 > CONFIG.C_S_AXI4_BASEADDR=0xFFFFFFFF
+- CELL /axi_quad_spi_0 > CONFIG.C_S_AXI4_HIGHADDR=0x00000000
+- CELL /axi_quad_spi_0 > CONFIG.C_S_AXI4_ID_WIDTH=4
+- CELL /axi_quad_spi_0 > CONFIG.C_TYPE_OF_AXI4_INTERFACE=0
+- CELL /axi_quad_spi_0 > CONFIG.C_USE_STARTUP=0
+- CELL /axi_quad_spi_0 > CONFIG.C_USE_STARTUP_INT=0
+- CELL /axi_quad_spi_0 > CONFIG.C_XIP_MODE=0
+- CELL /axi_quad_spi_0 > CONFIG.C_XIP_PERF_MODE=1
+- CELL /axi_quad_spi_0 > CONFIG.Component_Name=shell_bd_axi_quad_spi_0_0
+- CELL /axi_quad_spi_0 > CONFIG.FIFO_INCLUDED=1
+- CELL /axi_quad_spi_0 > CONFIG.Master_mode=1
+- CELL /axi_quad_spi_0 > CONFIG.Multiples16=1
+- CELL /axi_quad_spi_0 > CONFIG.QSPI_BOARD_INTERFACE=Custom
+- CELL /axi_quad_spi_0 > CONFIG.UC_FAMILY=1
+- CELL /axi_quad_spi_0 > CONFIG.USE_BOARD_FLOW=false
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.ADDR_WIDTH=7
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.ARUSER_WIDTH=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.AWUSER_WIDTH=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.BUSER_WIDTH=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.CLK_DOMAIN=shell_bd_clk_wiz_shell_0_clk_out1
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.DATA_WIDTH=32
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.FREQ_HZ=100000000
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.HAS_BRESP=1
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.HAS_BURST=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.HAS_CACHE=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.HAS_LOCK=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.HAS_PROT=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.HAS_QOS=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.HAS_REGION=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.HAS_RRESP=1
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.HAS_WSTRB=1
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.ID_WIDTH=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.INSERT_VIP=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.MAX_BURST_LENGTH=1
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.NUM_READ_OUTSTANDING=2
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.NUM_READ_THREADS=1
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.NUM_WRITE_OUTSTANDING=2
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.NUM_WRITE_THREADS=1
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.PHASE=0.0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.PROTOCOL=AXI4LITE
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.READ_WRITE_MODE=READ_WRITE
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.RUSER_BITS_PER_BYTE=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.RUSER_WIDTH=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.SUPPORTS_NARROW_BURST=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.WUSER_BITS_PER_BYTE=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE > CONFIG.WUSER_WIDTH=0
+- CELL /axi_quad_spi_0 > IPIN AXI_LITE vlnv=xilinx.com:interface:aximm_rtl:1.0 mode=Slave net=/axi_interconnect_0_M03_AXI
+- CELL /axi_quad_spi_0 > IPIN SPI_0 vlnv=xilinx.com:interface:spi_rtl:1.0 mode=Master net=-
+- CELL /axi_quad_spi_0 > PIN ext_spi_clk > CONFIG.ASSOCIATED_BUSIF=SPI_0
+- CELL /axi_quad_spi_0 > PIN ext_spi_clk > CONFIG.ASSOCIATED_PORT=
+- CELL /axi_quad_spi_0 > PIN ext_spi_clk > CONFIG.ASSOCIATED_RESET=
+- CELL /axi_quad_spi_0 > PIN ext_spi_clk > CONFIG.CLK_DOMAIN=shell_bd_clk_wiz_shell_0_clk_out1
+- CELL /axi_quad_spi_0 > PIN ext_spi_clk > CONFIG.FREQ_HZ=100000000
+- CELL /axi_quad_spi_0 > PIN ext_spi_clk > CONFIG.FREQ_TOLERANCE_HZ=0
+- CELL /axi_quad_spi_0 > PIN ext_spi_clk > CONFIG.INSERT_VIP=0
+- CELL /axi_quad_spi_0 > PIN ext_spi_clk > CONFIG.PHASE=0.0
+- CELL /axi_quad_spi_0 > PIN ext_spi_clk dir=I type=clk left= right= net=/clk_wiz_shell_clk_out1
+- CELL /axi_quad_spi_0 > PIN io0_i dir=I type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN io0_o dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN io0_t dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN io1_i dir=I type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN io1_o dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN io1_t dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN ip2intc_irpt > CONFIG.PortWidth=1
+- CELL /axi_quad_spi_0 > PIN ip2intc_irpt > CONFIG.SENSITIVITY=EDGE_RISING
+- CELL /axi_quad_spi_0 > PIN ip2intc_irpt dir=O type=intr left= right= net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_aclk > CONFIG.ASSOCIATED_BUSIF=AXI_LITE
+- CELL /axi_quad_spi_0 > PIN s_axi_aclk > CONFIG.ASSOCIATED_PORT=
+- CELL /axi_quad_spi_0 > PIN s_axi_aclk > CONFIG.ASSOCIATED_RESET=s_axi_aresetn
+- CELL /axi_quad_spi_0 > PIN s_axi_aclk > CONFIG.CLK_DOMAIN=shell_bd_clk_wiz_shell_0_clk_out1
+- CELL /axi_quad_spi_0 > PIN s_axi_aclk > CONFIG.FREQ_HZ=100000000
+- CELL /axi_quad_spi_0 > PIN s_axi_aclk > CONFIG.FREQ_TOLERANCE_HZ=0
+- CELL /axi_quad_spi_0 > PIN s_axi_aclk > CONFIG.INSERT_VIP=0
+- CELL /axi_quad_spi_0 > PIN s_axi_aclk > CONFIG.PHASE=0.0
+- CELL /axi_quad_spi_0 > PIN s_axi_aclk dir=I type=clk left= right= net=/clk_wiz_shell_clk_out1
+- CELL /axi_quad_spi_0 > PIN s_axi_araddr dir=I type=undef left=6 right=0 net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_aresetn > CONFIG.INSERT_VIP=0
+- CELL /axi_quad_spi_0 > PIN s_axi_aresetn > CONFIG.POLARITY=ACTIVE_LOW
+- CELL /axi_quad_spi_0 > PIN s_axi_aresetn dir=I type=rst left= right= net=/proc_sys_reset_shell_peripheral_aresetn
+- CELL /axi_quad_spi_0 > PIN s_axi_arready dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_arvalid dir=I type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_awaddr dir=I type=undef left=6 right=0 net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_awready dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_awvalid dir=I type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_bready dir=I type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_bresp dir=O type=undef left=1 right=0 net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_bvalid dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_rdata dir=O type=undef left=31 right=0 net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_rready dir=I type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_rresp dir=O type=undef left=1 right=0 net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_rvalid dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_wdata dir=I type=undef left=31 right=0 net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_wready dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_wstrb dir=I type=undef left=3 right=0 net=-
+- CELL /axi_quad_spi_0 > PIN s_axi_wvalid dir=I type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN sck_i dir=I type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN sck_o dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN sck_t dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 > PIN ss_i dir=I type=undef left=0 right=0 net=-
+- CELL /axi_quad_spi_0 > PIN ss_o dir=O type=undef left=0 right=0 net=-
+- CELL /axi_quad_spi_0 > PIN ss_t dir=O type=undef left= right= net=-
+- CELL /axi_quad_spi_0 vlnv=xilinx.com:ip:axi_quad_spi:3.2 type=ip
+- INET /axi_interconnect_0_M03_AXI : /axi_quad_spi_0/AXI_LITE
+- NET /clk_wiz_shell_clk_out1 : /axi_quad_spi_0/ext_spi_clk
+- NET /clk_wiz_shell_clk_out1 : /axi_quad_spi_0/s_axi_aclk
+- NET /proc_sys_reset_shell_peripheral_aresetn : /axi_quad_spi_0/s_axi_aresetn
+- XSEG /axi_quad_spi_0/AXI_LITE/Reg
++ ASEG /microblaze_0/Data/SEG_usd_spi_0_reg0 offset=0x44A40000 range=0x00010000 excluded= slave=/usd_spi_0/s_axi/reg0
++ ASEG /usd_spi_0/s_axi/reg0 offset= range=0x000100000000 excluded= slave=/microblaze_0/Data/SEG_usd_spi_0_reg0
++ CELL /axi_interconnect_0 > PIN M03_AXI_arprot dir=O type=undef left=2 right=0 net=-
++ CELL /axi_interconnect_0 > PIN M03_AXI_awprot dir=O type=undef left=2 right=0 net=-
++ CELL /axi_interconnect_0/m03_couplers > PIN M_AXI_arprot dir=O type=undef left=2 right=0 net=-
++ CELL /axi_interconnect_0/m03_couplers > PIN M_AXI_awprot dir=O type=undef left=2 right=0 net=-
++ CELL /axi_interconnect_0/m03_couplers > PIN S_AXI_arprot dir=I type=undef left=2 right=0 net=-
++ CELL /axi_interconnect_0/m03_couplers > PIN S_AXI_awprot dir=I type=undef left=2 right=0 net=-
++ CELL /axi_interconnect_0/tier2_xbar_0 > IPIN M03_AXI > CONFIG.NUM_READ_OUTSTANDING=1
++ CELL /axi_interconnect_0/tier2_xbar_0 > IPIN M03_AXI > CONFIG.NUM_WRITE_OUTSTANDING=1
++ CELL /usd_spi_0 > CONFIG.C_S_AXI_ADDR_WIDTH=32
++ CELL /usd_spi_0 > CONFIG.C_S_AXI_DATA_WIDTH=32
++ CELL /usd_spi_0 > CONFIG.Component_Name=shell_bd_usd_spi_0_0
++ CELL /usd_spi_0 > CONFIG.DEBOUNCE_CYCLES=1000000
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.ADDR_WIDTH=32
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.ARUSER_WIDTH=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.AWUSER_WIDTH=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.BUSER_WIDTH=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.CLK_DOMAIN=shell_bd_clk_wiz_shell_0_clk_out1
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.DATA_WIDTH=32
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.FREQ_HZ=100000000
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.HAS_BRESP=1
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.HAS_BURST=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.HAS_CACHE=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.HAS_LOCK=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.HAS_PROT=1
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.HAS_QOS=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.HAS_REGION=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.HAS_RRESP=1
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.HAS_WSTRB=1
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.ID_WIDTH=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.INSERT_VIP=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.MAX_BURST_LENGTH=1
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.NUM_READ_OUTSTANDING=1
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.NUM_READ_THREADS=1
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.NUM_WRITE_OUTSTANDING=1
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.NUM_WRITE_THREADS=1
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.PHASE=0.0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.PROTOCOL=AXI4LITE
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.READ_WRITE_MODE=READ_WRITE
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.RUSER_BITS_PER_BYTE=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.RUSER_WIDTH=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.SUPPORTS_NARROW_BURST=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.WUSER_BITS_PER_BYTE=0
++ CELL /usd_spi_0 > IPIN s_axi > CONFIG.WUSER_WIDTH=0
++ CELL /usd_spi_0 > IPIN s_axi vlnv=xilinx.com:interface:aximm_rtl:1.0 mode=Slave net=/axi_interconnect_0_M03_AXI
++ CELL /usd_spi_0 > PIN s_axi_aclk > CONFIG.ASSOCIATED_BUSIF=s_axi
++ CELL /usd_spi_0 > PIN s_axi_aclk > CONFIG.ASSOCIATED_PORT=
++ CELL /usd_spi_0 > PIN s_axi_aclk > CONFIG.ASSOCIATED_RESET=s_axi_aresetn
++ CELL /usd_spi_0 > PIN s_axi_aclk > CONFIG.CLK_DOMAIN=shell_bd_clk_wiz_shell_0_clk_out1
++ CELL /usd_spi_0 > PIN s_axi_aclk > CONFIG.FREQ_HZ=100000000
++ CELL /usd_spi_0 > PIN s_axi_aclk > CONFIG.FREQ_TOLERANCE_HZ=0
++ CELL /usd_spi_0 > PIN s_axi_aclk > CONFIG.INSERT_VIP=0
++ CELL /usd_spi_0 > PIN s_axi_aclk > CONFIG.PHASE=0.0
++ CELL /usd_spi_0 > PIN s_axi_aclk dir=I type=clk left= right= net=/clk_wiz_shell_clk_out1
++ CELL /usd_spi_0 > PIN s_axi_araddr dir=I type=undef left=31 right=0 net=-
++ CELL /usd_spi_0 > PIN s_axi_aresetn > CONFIG.INSERT_VIP=0
++ CELL /usd_spi_0 > PIN s_axi_aresetn > CONFIG.POLARITY=ACTIVE_LOW
++ CELL /usd_spi_0 > PIN s_axi_aresetn dir=I type=rst left= right= net=/proc_sys_reset_shell_peripheral_aresetn
++ CELL /usd_spi_0 > PIN s_axi_arprot dir=I type=undef left=2 right=0 net=-
++ CELL /usd_spi_0 > PIN s_axi_arready dir=O type=undef left= right= net=-
++ CELL /usd_spi_0 > PIN s_axi_arvalid dir=I type=undef left= right= net=-
++ CELL /usd_spi_0 > PIN s_axi_awaddr dir=I type=undef left=31 right=0 net=-
++ CELL /usd_spi_0 > PIN s_axi_awprot dir=I type=undef left=2 right=0 net=-
++ CELL /usd_spi_0 > PIN s_axi_awready dir=O type=undef left= right= net=-
++ CELL /usd_spi_0 > PIN s_axi_awvalid dir=I type=undef left= right= net=-
++ CELL /usd_spi_0 > PIN s_axi_bready dir=I type=undef left= right= net=-
++ CELL /usd_spi_0 > PIN s_axi_bresp dir=O type=undef left=1 right=0 net=-
++ CELL /usd_spi_0 > PIN s_axi_bvalid dir=O type=undef left= right= net=-
++ CELL /usd_spi_0 > PIN s_axi_rdata dir=O type=undef left=31 right=0 net=-
++ CELL /usd_spi_0 > PIN s_axi_rready dir=I type=undef left= right= net=-
++ CELL /usd_spi_0 > PIN s_axi_rresp dir=O type=undef left=1 right=0 net=-
++ CELL /usd_spi_0 > PIN s_axi_rvalid dir=O type=undef left= right= net=-
++ CELL /usd_spi_0 > PIN s_axi_wdata dir=I type=undef left=31 right=0 net=-
++ CELL /usd_spi_0 > PIN s_axi_wready dir=O type=undef left= right= net=-
++ CELL /usd_spi_0 > PIN s_axi_wstrb dir=I type=undef left=3 right=0 net=-
++ CELL /usd_spi_0 > PIN s_axi_wvalid dir=I type=undef left= right= net=-
++ CELL /usd_spi_0 > PIN usd_clk_o dir=O type=undef left= right= net=/usd_spi_0_usd_clk_o
++ CELL /usd_spi_0 > PIN usd_clk_oe dir=O type=undef left= right= net=/usd_spi_0_usd_clk_oe
++ CELL /usd_spi_0 > PIN usd_cmd_o dir=O type=undef left= right= net=/usd_spi_0_usd_cmd_o
++ CELL /usd_spi_0 > PIN usd_cmd_oe dir=O type=undef left= right= net=/usd_spi_0_usd_cmd_oe
++ CELL /usd_spi_0 > PIN usd_dat0_i dir=I type=undef left= right= net=/usd_dat0_i_1
++ CELL /usd_spi_0 > PIN usd_dat3_o dir=O type=undef left= right= net=/usd_spi_0_usd_dat3_o
++ CELL /usd_spi_0 > PIN usd_dat3_oe dir=O type=undef left= right= net=/usd_spi_0_usd_dat3_oe
++ CELL /usd_spi_0 > PIN usd_ncd_i dir=I type=undef left= right= net=/usd_ncd_i_1
++ CELL /usd_spi_0 vlnv=soclabs.org:user:usd_spi:1.0 type=ip
++ INET /axi_interconnect_0_M03_AXI : /usd_spi_0/s_axi
++ NET /clk_wiz_shell_clk_out1 : /usd_spi_0/s_axi_aclk
++ NET /proc_sys_reset_shell_peripheral_aresetn : /usd_spi_0/s_axi_aresetn
++ NET /usd_dat0_i_1 : /usd_dat0_i
++ NET /usd_dat0_i_1 : /usd_spi_0/usd_dat0_i
++ NET /usd_ncd_i_1 : /usd_ncd_i
++ NET /usd_ncd_i_1 : /usd_spi_0/usd_ncd_i
++ NET /usd_spi_0_usd_clk_o : /usd_clk_o
++ NET /usd_spi_0_usd_clk_o : /usd_spi_0/usd_clk_o
++ NET /usd_spi_0_usd_clk_oe : /usd_clk_oe
++ NET /usd_spi_0_usd_clk_oe : /usd_spi_0/usd_clk_oe
++ NET /usd_spi_0_usd_cmd_o : /usd_cmd_o
++ NET /usd_spi_0_usd_cmd_o : /usd_spi_0/usd_cmd_o
++ NET /usd_spi_0_usd_cmd_oe : /usd_cmd_oe
++ NET /usd_spi_0_usd_cmd_oe : /usd_spi_0/usd_cmd_oe
++ NET /usd_spi_0_usd_dat3_o : /usd_dat3_o
++ NET /usd_spi_0_usd_dat3_o : /usd_spi_0/usd_dat3_o
++ NET /usd_spi_0_usd_dat3_oe : /usd_dat3_oe
++ NET /usd_spi_0_usd_dat3_oe : /usd_spi_0/usd_dat3_oe
++ PORT /usd_clk_o dir=O type=undef left= right= net=/usd_spi_0_usd_clk_o
++ PORT /usd_clk_oe dir=O type=undef left= right= net=/usd_spi_0_usd_clk_oe
++ PORT /usd_cmd_o dir=O type=undef left= right= net=/usd_spi_0_usd_cmd_o
++ PORT /usd_cmd_oe dir=O type=undef left= right= net=/usd_spi_0_usd_cmd_oe
++ PORT /usd_dat0_i dir=I type=undef left= right= net=/usd_dat0_i_1
++ PORT /usd_dat3_o dir=O type=undef left= right= net=/usd_spi_0_usd_dat3_o
++ PORT /usd_dat3_oe dir=O type=undef left= right= net=/usd_spi_0_usd_dat3_oe
++ PORT /usd_ncd_i dir=I type=undef left= right= net=/usd_ncd_i_1
++ XSEG /usd_spi_0/s_axi/reg0

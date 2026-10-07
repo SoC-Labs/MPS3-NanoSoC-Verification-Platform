@@ -1,0 +1,30 @@
+#!/bin/sh
+#
+# mps3-unclaim — forget the TOFU SSH claim and reboot (IMAGE_CONTRACT §4.2).
+#
+# Run from the SERIAL console (the tty_02 share; root password login — SSH is
+# key-only, so a board whose claimant lost their key is recovered here).
+# Removes /persist/ssh/authorized_keys (the claim harnessd wrote on the first
+# TFTP WRQ named "authorized_keys"), rebuilds dropbear's key file (baked keys
+# stay), syncs, and reboots so the next claim starts from a clean board.
+#   mps3-unclaim            ask first
+#   mps3-unclaim --yes      no question (scripts)
+
+CLAIM=${MPS3_KEYS_CLAIM:-/persist/ssh/authorized_keys}
+
+if [ ! -s "$CLAIM" ]; then
+    echo "mps3-unclaim: not claimed ($CLAIM absent or empty) — nothing to do"
+    exit 0
+fi
+echo "mps3-unclaim: claimed keys:"
+grep -v '^[[:space:]]*#' "$CLAIM" | awk '{ print "   " $NF }'
+if [ "$1" != "--yes" ]; then
+    printf 'Remove the claim and reboot? [y/N] '
+    read -r ans
+    case "$ans" in y|Y|yes) ;; *) echo "mps3-unclaim: kept"; exit 1 ;; esac
+fi
+rm -f "$CLAIM" || { echo "mps3-unclaim: cannot remove $CLAIM"; exit 1; }
+/usr/sbin/mps3-keys-sync
+sync
+echo "mps3-unclaim: claim removed; rebooting"
+exec /usr/sbin/mps3-reboot

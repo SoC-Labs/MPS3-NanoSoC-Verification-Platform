@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "static_id": "0x72BB0A36",
+  "rm_id": "0x0100001E",
+  "rm_name": "led",
+  "ip_class": "open",
+  "clearing": {
+    "file": "led_clear.bin",
+    "len": 61828,
+    "crc32": "0x3a9cb0d1"
+  },
+  "partial": {
+    "file": "led.bin",
+    "len": 1262848,
+    "crc32": "0x709eb27c"
+  },
+  "built": "2026-09-23",
+  "vivado": "2024.1",
+  "static_usercode": "0xC8551081"
+}

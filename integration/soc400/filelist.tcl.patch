@@ -1,0 +1,89 @@
+--- a/pynq/filelist.tcl
++++ b/pynq/filelist.tcl
+@@ -50,6 +50,8 @@
+     ${ARM_IP_LIBRARY_PATH}/latest/Corstone-101/logical/cmsdk_apb_watchdog/verilog \
+     ${ARM_IP_LIBRARY_PATH}/latest/Corstone-101/logical/models/memories \
+     ${ARM_IP_LIBRARY_PATH}/PL022/PL022-BU-00000-r1p4-00rel0/ssp_pl022/verilog/rtl_source \
++    ${ARM_IP_LIBRARY_PATH}/SoC-400/coresight_soc/shared/logical/cxdapswjdp/verilog \
++    ${ARM_IP_LIBRARY_PATH}/SoC-400/coresight_soc/shared/logical/cxdapahbap/verilog \
+ ] [current_fileset]
+ 
+ ###=========================================================================
+@@ -78,11 +80,14 @@
+ ]
+ 
+ ###=========================================================================
+-### ARM Cortex-M0 core + DAP + integration (per-core SWD, EXTERNAL_DAP=0)
++### ARM Cortex-M0 core + integration (SoC-400 baseline: EXTERNAL_DAP=1).
++### slcorem0's `generate if (EXTERNAL_DAP!=0)` DROPS the internal CORTEXM0DAP,
++### so cortexm0_dap/verilog is no longer instantiated and is removed from the
++### compile (also avoids any module-name collision with the SoC-400 cells).
++### The SoC-level SoC-400 SWJ-DP block below drives the M0 DBGAHB slave bus.
+ ###=========================================================================
+ read_verilog [glob \
+     ${ARM_IP_LIBRARY_PATH}/latest/Cortex-M0/logical/cortexm0/verilog/*.v \
+-    ${ARM_IP_LIBRARY_PATH}/latest/Cortex-M0/logical/cortexm0_dap/verilog/*.v \
+     ${ARM_IP_LIBRARY_PATH}/latest/Cortex-M0/logical/cortexm0_integration/verilog/*.v \
+     ${ARM_IP_LIBRARY_PATH}/latest/Cortex-M0/logical/models/cells/*.v \
+     ${ARM_IP_LIBRARY_PATH}/latest/Cortex-M0/logical/models/wrappers/*.v \
+@@ -100,6 +105,60 @@
+ ]
+ 
+ ###=========================================================================
++### CoreSight SoC-400 system DAP (SWJ-DP + 2x AHB-AP) — SoC-400 baseline
++### integration (EXTERNAL_DAP=1). The SoC Labs wrapper set is carried into
++### this repo under src/rtl/coresight_soc400/ (see
++### integration/soc400/carry_manifest.md); the licensed Arm cxdapswjdp /
++### cxdapahbap cells are referenced IN PLACE from the read-only IP library
++### (this block is the Vivado-TCL translation of
++### coresight_soc400_{swjdp,ahbap}.flist). CARRY THE UNCONDITIONAL-CAPTURE
++### nanosoc_dbg_ahb_bridge.v — never the poll-gated single-AP variant.
++###=========================================================================
++set SOC400_RTL ${NANOSOC_SOC_DIR}/src/rtl/coresight_soc400
++set SOC400_IP  ${ARM_IP_LIBRARY_PATH}/SoC-400/coresight_soc/shared/logical
++
++# Arm SoC-400 AHB-AP (cxdapahbap) + generic CoreSight cells
++read_verilog [list \
++    ${SOC400_IP}/cxdapahbap/verilog/cxdapahbap.v \
++    ${SOC400_IP}/cxdapahbap/verilog/cxdapahbap_slv.v \
++    ${SOC400_IP}/cxdapahbap/verilog/cxdapahbap_mst.v \
++    ${SOC400_IP}/cxdapahbap/verilog/cxdapahbap_dap_sync.v \
++    ${SOC400_IP}/cxdapahbap/verilog/cxdapahbap_ahb_sync.v \
++    ${SOC400_IP}/models/cells/generic/cx_sync.v \
++    ${SOC400_IP}/models/cells/generic/cx_en_sync.v \
++    ${SOC400_IP}/models/cells/generic/cx_en_sync_high.v \
++    ${SOC400_IP}/models/cells/generic/cx_comb_mux2.v \
++]
++
++# Arm SoC-400 SWJ-DP (cxdapswjdp) + SWJ-DP-specific generic cells
++read_verilog [list \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp.v \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp_dapclk.v \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp_dp_apb_sync.v \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp_dp_i_mux.v \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp_dp_or.v \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp_jtag_dp_protocol.v \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp_sw_dp_apb_if.v \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp_sw_dp_protocol.v \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp_sw_dp_sync.v \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp_swclktck.v \
++    ${SOC400_IP}/cxdapswjdp/verilog/cxdapswjdp_swj_watcher.v \
++    ${SOC400_IP}/models/cells/generic/cxdapswjdp_clk_inverter.v \
++    ${SOC400_IP}/models/cells/generic/cxdapswjdp_dp_sync.v \
++]
++
++# SoC Labs SoC-400 wrapper set (carried from nanosoc-multicore-system).
++# nanosoc_dbg_ahb_bridge.v MUST be the multicore unconditional-capture version.
++read_verilog [list \
++    ${SOC400_RTL}/nanosoc_dap_ahb_xlate.v \
++    ${SOC400_RTL}/nanosoc_dap_ahb_arb.v \
++    ${SOC400_RTL}/nanosoc_dap_ss.v \
++    ${SOC400_RTL}/nanosoc_swj_dp_gate.v \
++    ${SOC400_RTL}/nanosoc_swj_dap_ss.v \
++    ${SOC400_RTL}/nanosoc_dbg_ahb_bridge.v \
++]
++
++###=========================================================================
+ ### SoCDebug (ADP controller, FT1248 controller, USRT)
+ ###=========================================================================
+ read_verilog [list \

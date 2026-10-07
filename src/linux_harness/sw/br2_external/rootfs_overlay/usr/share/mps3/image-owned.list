@@ -1,0 +1,3 @@
+# /etc/mps3 files that ALWAYS come from the image, never from /persist
+# (S12mps3persist discards any persisted copy at boot). version, static_id and
+# greybox_clear.bin are built in; add one relative path per line.

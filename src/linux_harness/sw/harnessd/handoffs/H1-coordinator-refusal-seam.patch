@@ -1,0 +1,57 @@
+--- a/firmware/coordinator/coordinator.h
++++ b/firmware/coordinator/coordinator.h
+@@ -44,6 +44,15 @@
+  * golden-test echo tool override it the same way. */
+ uint32_t mps3_shell_static_id(void);
+ 
++/* The swap/commit REFUSAL seam. NULL = allowed. An engine that cannot prove
++ * which fabric it is running on (the Linux harness: a card image whose claim
++ * disagrees with the stage0-baked fabric static_id, or no valid stage0 block --
++ * HARNESSD_CONTRACT.md §9.4) returns the reason, and `swap`/`commit` answer
++ * {"ok":false,"err":<reason>} BEFORE any register is touched. coordinator.c
++ * carries a WEAK default returning NULL, so a bare-metal image -- whose
++ * static_id is baked into the same bitstream as the fabric -- never refuses. */
++const char *mps3_swap_refusal(void);
++
+ /* Lifecycle. There is deliberately NO coordinator_main_loop() here: the
+  * superloop lives in firmware/platform/src/main.c (which interleaves the
+  * platform-only lwIP servicing with the module polls). The declaration that
+--- a/firmware/coordinator/coordinator.c
++++ b/firmware/coordinator/coordinator.c
+@@ -46,6 +46,12 @@
+     return 0u;
+ }
+ 
++/* WEAK "never refuse" for the swap/commit refusal seam (coordinator.h). */
++__attribute__((weak)) const char *mps3_swap_refusal(void)
++{
++    return 0;
++}
++
+ /* v0.11 per-boot state (defined with its verbs at the end of this file). */
+ static void coordinator_v011_reset(void);
+ 
+@@ -322,6 +328,11 @@
+      * coordinator_swap_final_response() (which reads
+      * swap_fsm_last_result()). The pcb bookkeeping for "later" is
+      * W-NET-SEAM's; the codec + result plumbing on this side are real. */
++    const char *why = mps3_swap_refusal();
++    if (why != 0) {
++        set_err(resp, why);   /* refused before the FSM (and any register) moves */
++        return;
++    }
+     if (swap_fsm_start(req->rm, req->src) == 0) {
+         resp->ok = 1; /* accepted -> dispatch defers the response */
+     } else {
+@@ -378,6 +389,11 @@
+     /* §8A.4/§8A.5: persist the currently-running (or named) RM as the new
+      * boot default: write inactive slot, verify CRC, flip active_slot. */
+     char slot = 0;
++    const char *why = mps3_swap_refusal();
++    if (why != 0) {
++        set_err(resp, why);
++        return;
++    }
+     int rc = overlay_store_commit(req->rm, &slot);
+     if (rc != 0) {
+         set_err(resp, "commit failed");

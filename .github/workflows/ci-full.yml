@@ -1,0 +1,105 @@
+name: full gate (self-hosted)
+
+# The EDA + board gate: everything the hosted board-free gate (ci.yml) cannot do
+# because it needs a licensed simulator, the lab IP library, and/or the MPS3
+# board -- cocotb benches under VCS, the overlay CRC round-trip, and (opt-in) an
+# on-board smoke test.
+#
+# DORMANT BY DESIGN. It is manual-trigger only (workflow_dispatch) and targets a
+# runner labelled [self-hosted, mps3-lab]; with no such runner registered it
+# simply never runs. To enable it, register a self-hosted runner on a lab box
+# that has `source set_env.sh` + VCS + the SoC source repos, then trigger this
+# workflow from the Actions tab. See docs/CI.md -> "Enabling the self-hosted
+# full gate".
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_board:
+        description: "Also run the on-board smoke test (requires a board lease)"
+        type: boolean
+        default: false
+
+jobs:
+  full-gate:
+    name: full make check (VCS)
+    runs-on: [self-hosted, mps3-lab]
+    steps:
+      - uses: actions/checkout@v4
+
+      # `make check SIM=vcs` is the whole gate: stages 1-5 (logic) + 6 (lint) +
+      # 7 (cocotb benches under VCS) + 8 (overlay CRC round-trip, when triples
+      # are present). set_env.sh puts VCS + the SoC source repos on PATH (I24).
+      - name: make check SIM=vcs
+        run: |
+          source set_env.sh
+          make check SIM=vcs
+
+      # On-board smoke — OPT-IN (inputs.run_board), BOARD-SAFE only (Phase A).
+      #
+      # Runs the Tier-3 board-safe subset of scripts/harness_regression.sh: CSR
+      # liveness + diag mailbox + control-plane ping. It deliberately does NOT run
+      # the 6910-push swap / console / SWD tiers -- the D16 flash-collision embargo
+      # forbids any commit/push/flash-writing swap on the shared board, so
+      # MPS3_RUN_SWAP/CONSOLE/SWD=0. (Those are a later phase, once the embargo is
+      # owned; they must run from a workstation over a tunnel, never on-hub.)
+      #
+      # Board-unavailable is a SKIP, not a failure: a shared board being busy or
+      # dark is not a code regression and must not redden this gate. Only a real
+      # assertion (dead CSR, ping/rm_id mismatch) fails the step.
+      #
+      # HOST WIRING comes from the RUNNER ENV -- never hardcoded here (public repo):
+      #   MPS3_HUB            fpgahub host that can reach the board; REQUIRED when the
+      #                       runner is a dev box, not the board hub.
+      #   MPS3_BOARD_VIA_HUB  1 => relay dataplane/JTAG via ssh $MPS3_HUB (dev-box
+      #                       runner); 0/unset if the runner IS the hub.
+      #   MPS3_BOARD_HOST     board data-plane IP (repo var, or the 192.168.10.101 default).
+      # Provision these on the self-hosted runner; do not commit real hostnames.
+      - name: On-board smoke (opt-in, board-safe)
+        if: ${{ inputs.run_board }}
+        env:
+          MPS3_BOARD_HOST: ${{ vars.MPS3_BOARD_HOST || '192.168.10.101' }}
+          MPS3_ACQUIRE_TIMEOUT_S: "900"
+        run: |
+          set -uo pipefail
+          source set_env.sh
+          HOLDER="ci-mps3-${GITHUB_RUN_ID:-$$}"
+
+          # 1. Lease, bounded. Board busy -> neutral SKIP, not FAIL.
+          TOKEN="$(scripts/mps3_lease_acquire.sh "$HOLDER" || true)"
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::board busy/unavailable -- on-board smoke SKIPPED (not a failure)"
+            exit 0
+          fi
+          # Always release: tolerate the expected HTTP 403, and clear a stray queue entry.
+          cleanup() {
+            scripts/mps3_board.sh release "$TOKEN" "$HOLDER" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          scripts/mps3_board.sh status || true
+
+          # 2. Ensure a live shell. Relay the ping via the hub when the runner is a
+          #    dev box (pipe ping_check.py over ssh -- no checkout needed on the hub).
+          ping_board() {
+            if [ "${MPS3_BOARD_VIA_HUB:-0}" = "1" ]; then
+              ssh -o BatchMode=yes "${MPS3_HUB:?MPS3_HUB must be set for relay}" \
+                  python3 - "$MPS3_BOARD_HOST" < scripts/harness_gates/ping_check.py
+            else
+              python3 scripts/harness_gates/ping_check.py "$MPS3_BOARD_HOST"
+            fi
+          }
+          if ! ping_board; then
+            echo "::warning::board dark -- attempting one JTAG recover"
+            scripts/mps3_recover.sh || true
+            if ! ping_board; then
+              echo "::warning::board still dark after recover (needs a human power-cycle) -- SKIPPED"
+              exit 0
+            fi
+          fi
+
+          # 3. Board-SAFE smoke: CSR liveness + mailbox + ping. No push/commit/flash.
+          #    harness_regression.sh self-preflights (lease held + --allow-board) and
+          #    handles the hub relay via MPS3_BOARD_VIA_HUB. A real assertion here
+          #    fails the step (that is the signal we want).
+          MPS3_RUN_SWAP=0 MPS3_RUN_CONSOLE=0 MPS3_RUN_SWD=0 \
+            scripts/harness_regression.sh --only 3 --allow-board

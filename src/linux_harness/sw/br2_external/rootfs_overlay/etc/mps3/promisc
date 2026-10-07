@@ -1,0 +1,14 @@
+# /etc/mps3/promisc — eth0 promiscuous-mode knob (sourced by S41mps3net).
+#
+# DEFAULT OFF (MPS3_PROMISC=0). Rationale: the bare-metal shell ran the
+# LAN9220 promiscuous because the shell MAC and the DUT MAC shared the ONE
+# physical port (SERVICE_DISPOSITION.md red flag 6 / DRIVER_MATRIX open item
+# 5). Whether that shared-port two-MAC model still holds for the Linux
+# successor is an OPEN board decision, so promiscuous is NOT enabled by
+# default — a promiscuous NIC on a bench segment is a needless exposure until
+# the shared-port requirement is confirmed for this shell.
+#
+# Set MPS3_PROMISC=1 (edit here, or provision this file at deploy) ONLY once
+# the shared-port model is confirmed. S41mps3net then runs
+# `ip link set eth0 promisc on` after the interface is up.
+MPS3_PROMISC=0

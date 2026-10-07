@@ -1,0 +1,44 @@
+gpio_shield -- output-only dut_gpio -> SH0 shield pad passthrough
+DUT   : fpga/shell/ip/board_gpio/board_gpio.sv (real synthesizable RTL)
+IOBUF : behavioural per-bit (matches CONNECTOR_SURVEY.md §6 sketch)
+VCS   : vcs script version : T-2022.06
+
+Command: <repo>/tests/gpio_shield/./simv_gpio -l run.log
+Chronologic VCS simulator copyright 1991-2022
+Contains Synopsys proprietary information.
+Compiler version T-2022.06-SP2_Full64; Runtime version T-2022.06-SP2_Full64;  Jul 10 23:45 2026
+GPIO_SH: === output-only passthrough: dut_gpio_o -> SH0_IO pad ===
+GPIO_SH:   ok  drive dut_gpio_o=0001 -> SH0_IO=0001
+GPIO_SH:   ok  drive dut_gpio_o=0002 -> SH0_IO=0002
+GPIO_SH:   ok  drive dut_gpio_o=0004 -> SH0_IO=0004
+GPIO_SH:   ok  drive dut_gpio_o=0008 -> SH0_IO=0008
+GPIO_SH:   ok  drive dut_gpio_o=0010 -> SH0_IO=0010
+GPIO_SH:   ok  drive dut_gpio_o=0020 -> SH0_IO=0020
+GPIO_SH:   ok  drive dut_gpio_o=0040 -> SH0_IO=0040
+GPIO_SH:   ok  drive dut_gpio_o=0080 -> SH0_IO=0080
+GPIO_SH:   ok  drive dut_gpio_o=0100 -> SH0_IO=0100
+GPIO_SH:   ok  drive dut_gpio_o=0200 -> SH0_IO=0200
+GPIO_SH:   ok  drive dut_gpio_o=0400 -> SH0_IO=0400
+GPIO_SH:   ok  drive dut_gpio_o=0800 -> SH0_IO=0800
+GPIO_SH:   ok  drive dut_gpio_o=1000 -> SH0_IO=1000
+GPIO_SH:   ok  drive dut_gpio_o=2000 -> SH0_IO=2000
+GPIO_SH:   ok  drive dut_gpio_o=4000 -> SH0_IO=4000
+GPIO_SH:   ok  drive dut_gpio_o=8000 -> SH0_IO=8000
+GPIO_SH:   ok  drive dut_gpio_o=ffff -> SH0_IO=ffff
+GPIO_SH:   ok  drive dut_gpio_o=0000 -> SH0_IO=0000
+GPIO_SH:   ok  drive dut_gpio_o=a5a5 -> SH0_IO=a5a5
+GPIO_SH:   ok  drive dut_gpio_o=5a5a -> SH0_IO=5a5a
+GPIO_SH: === tristate: OE=0 releases the pad (no external fight) ===
+GPIO_SH:   ok  OE=0 -> SH0_IO hi-Z -> reads external pulldown (0)
+GPIO_SH:   ok  mixed OE 0x00FF -> SH0_IO=00ff (driven bits high, released bits pulled 0)
+
+GPIO_SH: ============================================================
+GPIO_SH: output-only dut_gpio -> shield pad (board_gpio + §6 IOBUF):
+GPIO_SH:   errors=0  VERDICT=PASS
+GPIO_SH: ============================================================
+$finish called from file "<repo>/tests/gpio_shield/tb_gpio_shield.sv", line 118.
+$finish at simulation time               677000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 677000 ps
+CPU Time:      0.380 seconds;       Data structure size:   0.0Mb
+Fri Jul 10 23:45:46 2026

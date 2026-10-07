@@ -1,0 +1,18 @@
+; ETH_SMB0 -- MCC LAN9220 SMB/LAN sideband OFF in the nanoSoC app-note config.
+;
+; WHY THIS IS AN EXPERIMENT
+; The MCC brings the LAN9220 up over its SMB (+SCC) sideband while it is
+; configuring the FPGA. templates/nanosoc.txt already carries the counter-case
+; in writing: "If the board fails to program with these TRUE (MCC hangs on
+; SMB), set both to FALSE". That is a named suspect for a config step that
+; sometimes does not complete -- and the boot lottery is a config step that
+; sometimes does not complete.
+;
+; It changes NOTHING about the Ethernet reference clock: OSC0 stays 25.0 (a
+; separate fix, and the one that must never be touched).
+;
+; This variant is the exact equivalent of the pre-existing
+; `ETH_SMB=0 ./assemble_sd.sh` env knob, kept in step with it by
+; host/pyverify/tests/test_bootrate.py so that ONE experiment does not end up
+; with two mechanisms and two names.
+DESCRIPTION: LAN9220 MCC SMB/LAN sideband disabled in nanosoc.txt (OSC0 untouched)

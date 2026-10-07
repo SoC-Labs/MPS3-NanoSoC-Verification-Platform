@@ -1,0 +1,9 @@
+[submodule "fpga/fpga-toolkit"]
+	path = fpga/fpga-toolkit
+	url = https://github.com/SoC-Labs/nanoSoC-FPGA-Toolkit.git
+[submodule "fpga/deps/nanosoc_m0_soc"]
+	path = fpga/deps/nanosoc_m0_soc
+	url = https://git.soton.ac.uk/soclabs/nanosoc-m0/nanosoc_m0_soc.git
+[submodule "fpga/deps/ahb_qspi"]
+	path = fpga/deps/ahb_qspi
+	url = https://git.soton.ac.uk/soclabs/ahb_qspi.git

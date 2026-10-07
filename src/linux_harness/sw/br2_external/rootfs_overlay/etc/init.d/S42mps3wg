@@ -1,0 +1,69 @@
+#!/bin/sh
+#
+# S42mps3wg — bring up the wg0 WireGuard transport (fpgahub mesh peer).
+#
+# Sequenced S42: after S41mps3net (eth0 must be up for the UDP endpoint) and
+# before S90mps3d (the control plane binds the wg0 mesh address). wg0 is
+# transport only — see docs/HARDWARE_HUB_INTEGRATION.md.
+#
+# The config is provisioned, never committed (same secrets seam as static_id /
+# the root password). On a provisioned image the provisioning hook has baked:
+#   /etc/wireguard/wg0.conf  (0600, `wg setconf` format — NO Address key)
+#   /etc/mps3/wg0.addr       (0644, the wg0 interface address in CIDR form)
+# On an UNPROVISIONED image neither exists, and the wg0.conf presence-check
+# below is a clean no-op (fail-soft, like S41mps3net's eth0 check). No bash in
+# the image and no wg-quick — bring-up is manual via `ip` + `wg`. The documented
+# shape of the config lives in /etc/mps3/wg0.conf.template.
+
+WG_CONF=/etc/wireguard/wg0.conf
+WG_ADDR_FILE=/etc/mps3/wg0.addr
+
+case "$1" in
+    start)
+        [ -r "$WG_CONF" ] || { echo "mps3wg: no $WG_CONF, unprovisioned — skipping"; exit 0; }
+        # Address is required to make the interface useful; missing/empty is a
+        # provisioning gap, not a reason to hard-fail the boot.
+        ADDR=$(grep -v '^[[:space:]]*$' "$WG_ADDR_FILE" 2>/dev/null | head -n 1)
+        if [ -z "$ADDR" ]; then
+            echo "mps3wg: no wg0 address in $WG_ADDR_FILE — skipping"
+            exit 0
+        fi
+
+        # Idempotent-ish: if wg0 is left over from a prior start, tear it down
+        # first so `ip link add` can not fail on an existing device.
+        if [ -d /sys/class/net/wg0 ]; then
+            echo "mps3wg: wg0 already present — tearing down first"
+            ip link set down dev wg0 2>/dev/null
+            ip link del dev wg0 2>/dev/null
+        fi
+
+        # Manual bring-up (no wg-quick): create, load keys/peer, address, up.
+        ip link add dev wg0 type wireguard || { echo "mps3wg: ip link add wg0 failed"; exit 0; }
+        wg setconf wg0 "$WG_CONF"
+        ip address add "$ADDR" dev wg0
+        ip link set up dev wg0
+
+        # Route the peer AllowedIPs that fall outside the wg0 on-link subnet.
+        # `wg show wg0 allowed-ips` prints:  <pubkey>\t<cidr> <cidr> ...
+        # Skip the address already on-link; swallow "File exists" on re-runs.
+        wg show wg0 allowed-ips 2>/dev/null | while read -r _peer cidrs; do
+            for cidr in $cidrs; do
+                [ "$cidr" = "$ADDR" ] && continue
+                [ "$cidr" = "(none)" ] && continue
+                ip route add "$cidr" dev wg0 2>/dev/null || true
+            done
+        done
+
+        ENDPOINT=$(wg show wg0 endpoints 2>/dev/null | awk '{print $2; exit}')
+        echo "mps3wg: wg0 up $ADDR, peer ${ENDPOINT:-<none>}"
+        ;;
+    stop)
+        ip link set down dev wg0 2>/dev/null
+        ip link del dev wg0 2>/dev/null
+        ;;
+    *)
+        echo "Usage: $0 {start|stop}"
+        exit 1
+        ;;
+esac
+exit 0

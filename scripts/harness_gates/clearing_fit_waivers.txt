@@ -1,0 +1,28 @@
+# Tier-0 clearing-buffer fit waivers (check_clearing_fits.py --waivers).
+#
+# Each line: <rm_name>  # reason / owner / how it gets burned down
+#
+# A waiver keeps `make check` green on a KNOWN, tracked gap. It is NOT a fix.
+# Removing a line must make the gate go red until the RM's clearing actually
+# fits both firmware buffers. Do NOT add a new waiver to silence a NEW gap
+# without an owner and a burn-down path.
+#
+# Both buffers must hold a clearing, and they must COEXIST: the incoming
+# clearing is resident in config_agent's slot while SWAP_STREAM_CLEARING
+# replays the outgoing one from swap_fsm's arena. So dec = 226,652 + 2X.
+#   LMB_KB=512  (usable   524,080 B) -> X caps at 148,714
+#   LMB_KB=1024 (usable 1,048,368 B) -> X caps at 410,858
+#
+# ---------------------------------------------------------------------------
+# EMPTY, and it should stay that way.
+#
+# BURNED DOWN 2026-07-10: `nanosoc` was waived here. Its clearing is 155,864 B
+# (it grew from 117,684 B when 2ae204e baked firmware into the RM), which did
+# not fit at LMB_KB=512 -- two such buffers overflowed local_lmb by 14,152 B.
+# Fixed properly rather than waived permanently: LMB_KB 512 -> 1024
+# (blk_mem_gen Write_Depth_A 131072 -> 262144 + both ilmb/dlmb address ranges
+# 512K -> 1M, diag mailbox 0x7FF80 -> 0xFFF80). Every RM's clearing is now
+# RAM-resident and no clearing reaches the QSPI flash.
+#
+# If a future RM does not fit, prefer raising the LMB again (KU115 BRAM: 1 MiB
+# is ~11.9% of 2160 RAMB36E2) over adding a line here.

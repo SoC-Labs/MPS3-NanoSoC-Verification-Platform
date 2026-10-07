@@ -1,0 +1,8 @@
+source "$BR2_EXTERNAL_MPS3_HARNESS_PATH/package/mps3-harnessd/Config.in"
+source "$BR2_EXTERNAL_MPS3_HARNESS_PATH/package/mps3-spi-usd/Config.in"
+source "$BR2_EXTERNAL_MPS3_HARNESS_PATH/package/mps3-slot/Config.in"
+source "$BR2_EXTERNAL_MPS3_HARNESS_PATH/package/mps3-debug/Config.in"
+comment "legacy variant (v0.7 daemons, mps3_dfx.ko, mps3-clcdd) - until the deletion PR"
+source "$BR2_EXTERNAL_MPS3_HARNESS_PATH/package/mps3-legacy-daemons/Config.in"
+source "$BR2_EXTERNAL_MPS3_HARNESS_PATH/package/mps3-apps/Config.in"
+source "$BR2_EXTERNAL_MPS3_HARNESS_PATH/package/mps3-dfx/Config.in"

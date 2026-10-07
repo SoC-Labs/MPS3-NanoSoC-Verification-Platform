@@ -1,0 +1,10 @@
+# Docs-site build toolchain (MkDocs + Material). Pinned for reproducible
+# `mkdocs build` in CI (.github/workflows/docs.yml) and locally:
+#   cd docs/site && python3 -m venv .venv && . .venv/bin/activate
+#   pip install -r requirements.txt && mkdocs serve
+#
+# The theme bundles its own CSS/JS/fonts -- the built site pulls NO external
+# CDN at runtime. Reference/guide pages link out to repo docs as absolute
+# GitHub blob URLs (see mkdocs.yml), so no include plugin is required.
+mkdocs==1.6.1
+mkdocs-material==9.7.7

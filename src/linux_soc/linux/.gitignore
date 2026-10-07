@@ -1,0 +1,11 @@
+# Heavy, fully regenerable. Track only configs/, the DTS, scripts, README, and the
+# boot log. Everything below is rebuilt by `make -C buildroot` / mk_toolchain_wrapper.sh.
+buildroot/
+device-tree-xlnx/
+toolchain_wrapper/
+logs/
+
+# Build products. artifacts/ holds the Image/rootfs/dtb handed to the co-sim and the
+# board package -- they are large binaries, so they are NOT tracked either; regenerate
+# with build.sh. The DTB is cheap to rebuild from mbv_soc.dts (dtc).
+artifacts/

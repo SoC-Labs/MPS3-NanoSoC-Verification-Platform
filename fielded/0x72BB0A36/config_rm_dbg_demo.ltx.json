@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "rm_key": "rm_dbg_demo",
+  "rp_inst": "u_rp_dut",
+  "ltx": "config_rm_dbg_demo.ltx",
+  "ltx_crc32": "0x753a1b6d",
+  "ltx_len": 5313,
+  "partial": "config_rm_dbg_demo_pblock_rp_dut_partial.bin",
+  "partial_crc32": "0xc61e6866",
+  "ila_uuids": [
+    "B18B3F67433359B4A1D657D53DA82FC9"
+  ],
+  "cores": [
+    {
+      "name": "u_rp_dut/u_dbg_hub/u_bridge/inst/xsdbm",
+      "type": "XSDB_V3"
+    },
+    {
+      "name": "u_rp_dut/u_ila",
+      "type": "ILA_V3"
+    }
+  ]
+}

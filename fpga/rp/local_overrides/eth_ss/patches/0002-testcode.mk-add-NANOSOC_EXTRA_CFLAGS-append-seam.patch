@@ -1,0 +1,19 @@
+--- a/nanosoc_arch_tech/firmware/build/testcode.mk	2026-09-10 15:00:50.578925346 +0100
++++ b/nanosoc_arch_tech/firmware/build/testcode.mk	2026-09-10 15:00:50.638931202 +0100
+@@ -50,6 +50,16 @@
+ CC_EXTRA_FLAGS_ARMCC  ?=
+ CC_EXTRA_FLAGS_ARMCLANG ?=
+ GNU_CC_EXTRA_FLAGS    ?=
++# NANOSOC_EXTRA_CFLAGS is the APPEND seam for a parent flow that needs to add
++# flags (board -D defines, say) to a firmware target it does not own.
++# Passing GNU_CC_EXTRA_FLAGS on the make command line CANNOT do that: a
++# command-line variable overrides the `:=` in every sub-makefile at every
++# level, so the target's own -Os/-flto/section-GC flags are silently DELETED
++# and the same source compiles to a different binary depending on which entry
++# point built it. Append here instead; command-line NANOSOC_EXTRA_CFLAGS adds,
++# it never replaces.
++NANOSOC_EXTRA_CFLAGS  ?=
++GNU_CC_EXTRA_FLAGS    += $(NANOSOC_EXTRA_CFLAGS)
+ LINKER_NAME      ?= cmsdk_cm0
+ COMPILE_BIGEND   ?= 0
+ COMPILE_MICROLIB ?= 0

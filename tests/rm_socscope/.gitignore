@@ -1,0 +1,8 @@
+# Per-configuration cocotb results. tests/.gitignore ignores `sim_build_*/` for
+# every bench but names result files ONE AT A TIME (results.xml,
+# results_fake.xml, results_readpath.xml), and this bench writes five
+# (results_<cfg>.xml, one per elaboration). Ignored here rather than by widening
+# the shared file: the same local-.gitignore precedent as
+# tests/mdio_phy_model/.gitignore, and it keeps a five-lane wave out of one
+# shared file for a housekeeping line.
+results_*.xml

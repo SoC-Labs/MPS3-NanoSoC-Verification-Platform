@@ -1,0 +1,41 @@
+LAN8720 SUT -- real ethernet-subsystem DUT at the MDIO boundary
+DUT   : ethmac_ahb_rmii (OpenCores ethmac + eth_miim MDIO master)
+PHY   : fpga/ethernet/mdio_phy_model (this repo's Clause-22 virtual PHY)
+shield: tests/shield_path/shield_path.sv (MPS3 J28/PMOD0 path, fault injectable)
+VCS   : vcs script version : T-2022.06
+
+Command: <repo>/tests/lan8720_sut/./simv_sut -l run.log
+Chronologic VCS simulator copyright 1991-2022
+Contains Synopsys proprietary information.
+Compiler version T-2022.06-SP2_Full64; Runtime version T-2022.06-SP2_Full64;  Jul 14 23:19 2026
+LAN8720_SUT: DUT MODER default = 0x0000a000 (expect ~0x0000A000)
+
+LAN8720_SUT: PHASE 1 -- healthy shield (both directions pass)
+LAN8720_SUT:   ok    PHYID1 (reg 2)                 0x0007
+LAN8720_SUT:   ok    PHYID2 (reg 3)                 0xc0f1
+LAN8720_SUT:   ok    ANAR   (reg 4)                 0x01e1
+
+LAN8720_SUT: PHASE 2 -- inbound (PHY->FPGA) DEAD
+LAN8720_SUT:   ok    BMSR=0xFFFF at all 32 PHY addresses (board finding #3)
+LAN8720_SUT:   issuing a WRITE while inbound is dead
+LAN8720_SUT:   ok    ANAR readback while dead       0xffff
+
+LAN8720_SUT: PHASE 3 -- inbound restored; is the register file readable again?
+LAN8720_SUT:   ok    ANAR = 0x0181 (the written value) -> MDIO WRITE landed
+LAN8720_SUT:   ok    PHYID1 again                   0x0007
+
+LAN8720_SUT: ============================================================
+LAN8720_SUT: PRIMARY RESULT -- reproduce the MPS3 dead-inbound signature
+LAN8720_SUT:   with the REAL DUT MDIO master (OpenCores eth_miim):
+LAN8720_SUT:   inbound dead -> MDIO reads 0xFFFF at all 32 PHY addresses.
+LAN8720_SUT:   repro_ok=1   unexplained_failures=0
+LAN8720_SUT:
+LAN8720_SUT: VERDICT=PASS
+LAN8720_SUT: ============================================================
+
+$finish called from file "<repo>/tests/lan8720_sut/tb_lan8720_sut.sv", line 329.
+$finish at simulation time            469380000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 469380000 ps
+CPU Time:      0.430 seconds;       Data structure size:   0.1Mb
+Tue Jul 14 23:19:56 2026

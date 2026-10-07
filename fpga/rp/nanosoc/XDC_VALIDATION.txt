@@ -1,0 +1,73 @@
+================================================================================
+nanosoc_ooc.xdc — OOC timing validation evidence
+Contract: docs/contracts/partition-timing.md v0.1
+Tool: Vivado 2024.1, part xcku115-flvb1760-1-c
+Date: 2026-07-07 (A2, socketed-XDC delivery)
+================================================================================
+
+STATUS: HONEST DEGRADE. nanosoc_ooc.xdc is AUTHORED and WIRED into ooc_synth.tcl
+(guarded read_xdc), but a full standalone OOC synth of the real rm_nanosoc
+CANNOT run in this environment — the same external-IP blocker fpga/rp/nanosoc/
+README.md already documents:
+
+  filelist.tcl (tclsh dry-run) hard-fails on 2 missing nanosoc_gen soc_glue
+  helpers, absent in BOTH lab worktrees:
+    - .../nanosoc-gen-tests/rtl/soc_glue/soc_glue_mux2.sv        (MISSING)
+    - .../nanosoc-gen-tests/rtl/soc_glue/soc_glue_reset_sync.sv  (MISSING)
+  (plus the not-yet-built stage-0 bootrom RTL — warns, non-fatal).
+
+So there is no real rm_nanosoc netlist to run report_timing_summary against
+here. Rather than fabricate a full SoC, the XDC was validated two ways:
+
+--------------------------------------------------------------------------------
+1. read_xdc-legality + clock-definition SMOKE TEST (Vivado 2024.1, REAL)
+--------------------------------------------------------------------------------
+nanosoc_ooc.xdc was read_xdc'd against a port-matched stub of
+rp_nanosoc_wrapper (exact 30-port partition-pin boundary + trivial dut_clk and
+swd_clk register logic; scratch-only, not a deliverable):
+
+  Synthesis            : 0 errors, 0 critical warnings.
+  read_xdc             : NO Designutils 20-1307 — the XDC is read_xdc-legal
+                         (no if/foreach/puts control-flow).
+  BEFORE get_clocks    : (empty) — 0 clocks
+  AFTER  get_clocks    : 'dut_clk swd_clk'   (2 clocks defined)
+
+  Clock Summary (AFTER):
+    dut_clk   period 20.000 ns  waveform {0.000 10.000}  (50 MHz — matches the
+              static clk_wiz_dut/clk_out1 byte-for-byte, partition-timing.md)
+    swd_clk   period 100.000 ns waveform {0.000 50.000}  (10 MHz OOC-ONLY bound
+              for the SW-DP; no static counterpart — partition-timing.md O2)
+
+  Clock interaction:
+    swd_clk -> dut_clk : Ignored / Asynchronous Groups   (async_dutclk_swdclk
+                         took effect — the CoreSight DAP CDC is not timed)
+    dut_clk -> dut_clk : Clean / Timed
+    swd_clk -> swd_clk : Clean / Timed
+
+  => The create_clock / set_clock_groups / set_false_path syntax is valid and
+     defines exactly the intended clocks + async group.
+
+--------------------------------------------------------------------------------
+2. Why no <rm>_rm.xdc for this RM
+--------------------------------------------------------------------------------
+rm_nanosoc is effectively SINGLE-CLOCK at DFX implementation:
+  - the whole nanosoc core + the uart_axis_shim run on dut_clk (the shim's
+    baud divider is a synchronous dut_clk counter; its 2-FF "sync" samples an
+    internal dut_clk-domain loopback — single domain, no CDC, no exception);
+  - the only other domain is the SW-DP on swd_clk, which is a firmware
+    bit-banged CSR pin with NO create_clock in the static (partition-pins.md
+    SWD group / shell-regmap.md SWDBB), so it carries no clock at link and the
+    swd async group is an OOC-only convenience.
+There is therefore nothing RM-internal to reapply scoped to the RP cell at
+link, so rm_nanosoc ships nanosoc_ooc.xdc ONLY (no eth_ss-style _rm.xdc).
+
+--------------------------------------------------------------------------------
+TO GET THE REAL BEFORE/AFTER (once the blocker clears)
+--------------------------------------------------------------------------------
+Provide a nanosoc_gen checkout that actually contains soc_glue_mux2.sv +
+soc_glue_reset_sync.sv (export SOCLABS_NANOSOC_GEN_DIR), build the stage-0
+bootrom, then:
+  vivado -mode batch -source fpga/rp/nanosoc/ooc_synth.tcl
+ooc_synth.tcl now reads nanosoc_ooc.xdc when present and emits
+$OUT_DIR/timing_rm_nanosoc.rpt — expect dut_clk (50 MHz) to constrain the whole
+core with real WNS, replacing today's "no user specified timing constraints".

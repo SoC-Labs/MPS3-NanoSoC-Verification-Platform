@@ -1,0 +1,7 @@
+config BR2_PACKAGE_MPS3_SLOT
+	bool "mps3-slot"
+	help
+	  /usr/sbin/mps3-slot: the Linux side of stage0's user-microSD
+	  layout (STAGE0_CONTRACT §6) — status, the power-safe boot-select
+	  sector write (lower-seq copy, max+1), and writing a checked S0LB
+	  image into slot A or B.

@@ -1,0 +1,19 @@
+--- a/sys_desc/subsystems/cpu/nanosoc_ss_cpu.yaml
++++ b/sys_desc/subsystems/cpu/nanosoc_ss_cpu.yaml
+@@ -42,6 +42,7 @@
+     WPT:             { type: int, default: 2,            desc: "Number of DWT comparators" }
+     RESET_ALL_REGS:  { type: int, default: 0,            desc: "Reset all registers" }
+     INCLUDE_JTAG:    { type: int, default: 0,            desc: "Include JTAG feature" }
++    EXTERNAL_DAP:    { type: int, default: 0,            desc: "slcorem0 debug DAP: 0=internal CORTEXM0DAP + per-core SWD (RTL default, matches every current build); 1=external SoC-level DAP drives the always-present DBGAHB_SLV* slave bus (opt-in per project)" }
+     ROMTABLE_BASE:   { type: int, default: 0xE00FF003,   desc: "ROM table base address pointer" }
+     BOOTROM_ADDR_W:  { type: int, default: 11,           desc: "Boot ROM address width (phys = 2^N bytes)" }
+     IMEM_RAM_ADDR_W: { type: int, default: 14,           desc: "IMEM address width" }
+@@ -99,7 +100,7 @@
+     - instance_name: u_cpu_0
+       module: slcorem0
+       addressable: False
+-      params: { CLKGATE_PRESENT: $CLKGATE_PRESENT, BE: $BE, BKPT: $BKPT, DBG: $DBG, NUMIRQ: $NUMIRQ, SMUL: $SMUL, SYST: $SYST, WIC: $WIC, WICLINES: $WICLINES, WPT: $WPT, RESET_ALL_REGS: $RESET_ALL_REGS, INCLUDE_JTAG: $INCLUDE_JTAG, ROMTABLE_BASE: $ROMTABLE_BASE, EXTERNAL_DAP: 1 }
++      params: { CLKGATE_PRESENT: $CLKGATE_PRESENT, BE: $BE, BKPT: $BKPT, DBG: $DBG, NUMIRQ: $NUMIRQ, SMUL: $SMUL, SYST: $SYST, WIC: $WIC, WICLINES: $WICLINES, WPT: $WPT, RESET_ALL_REGS: $RESET_ALL_REGS, INCLUDE_JTAG: $INCLUDE_JTAG, ROMTABLE_BASE: $ROMTABLE_BASE, EXTERNAL_DAP: $EXTERNAL_DAP }
+       connections:
+         # AHB master — routed through internal busmatrix
+         - { port: ahb_master, conn: nanosoc_cpu_ss_ahb_interconnect.cpu_0 }

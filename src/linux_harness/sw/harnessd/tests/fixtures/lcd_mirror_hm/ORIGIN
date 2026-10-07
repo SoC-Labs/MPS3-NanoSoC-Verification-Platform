@@ -1,0 +1,18 @@
+Copied VERBATIM from Harness Manager (github SoC-Labs/HarnessManager, main @ aae155c;
+these files last changed in 2724279, 2026-09-26) -- Harness Manager's request H2 in its
+docs/design/LCD_MIRROR.md §11. Do not edit here: re-copy from that repo.
+ONE local deviation (public release): lcd_mirror_decoder.py's LCDM_PLATFORM default is
+this checkout's root (HERE.parents[6]) instead of an absolute home-directory path.
+
+  lcd_mirror_decoder.py      tests/spikes/lcd_mirror_decoder.py  (Hx8347dShadow, HM's bus model)
+  fwstream.c                 tests/spikes/lcd_mirror_data/fwstream.c  (how the streams were captured)
+  <name>.stream.z            tests/spikes/lcd_mirror_data/  zlib({rs, byte} pairs; rs 2 = a clcd_0
+                             CTRL write, bit 2 = RESET_N), captured from firmware/clcd/clcd.c
+                             (feat/linux-harness 4956d88) through mock registers
+  <name>.grid                the renderer's 40x15 cell grid at quiescence ("INVrr |...|" rows)
+
+The scenarios are cumulative on ONE panel: boot, link_down, banner, then regain after a KVM
+reset pulse (HM's ctrl_reset_pulse(): CTRL 0x01, then 0x07).
+Gate: harnessd/tests/test_lcdmirror_e2e.py::test_hm_streams_* replays them through the C port
+(lcdmirror_replay) and compares every pixel with the font rendering of each grid, with HM's
+Hx8347dShadow and with the platform golden model (tests/lcd_mirror/hx8347_gram_model.py).

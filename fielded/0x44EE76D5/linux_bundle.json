@@ -1,0 +1,218 @@
+{
+  "fieldable": true,
+  "generated_at": "2026-09-28T22:54:18Z",
+  "generated_by": "fpga/dfx/tools/linux_bundle.py",
+  "mint_kind": "mint",
+  "schema": "mps3-linux-bundle",
+  "schema_version": "1",
+  "shell_cpu": "mbv",
+  "static_canon": "c906d74c5d03dae51c6227ac0e897ab5a4db37ffcd121a5fda4e78f25159eac1",
+  "static_id": "0x44EE76D5",
+  "static_usercode": "0xFB1F8C76",
+  "static_ver32": "0x01000000",
+  "targets": {
+    "ethernet": {
+      "components": {
+        "build_date": "2026-09-28T22:51:16Z",
+        "buildroot": "2026.02.3",
+        "date": "2026-09-28",
+        "dirty": "0",
+        "format": "1",
+        "greybox_clear_sha256": "d51c5ac91ac4ad2f98e6eb72d1b81ad2dedb79f0c911e10d1f360fbd56d9405d",
+        "greybox_clear_static_id": "0x44EE76D5",
+        "harness": "1.0.0",
+        "harnessd_sha256": "e91bf50498808511183432d60ba5eb688348f7b2d7613c0ae78072e476231b22",
+        "idle": "nowfi",
+        "image_kind": "release",
+        "impl": "linux",
+        "kernel": "6.18.7",
+        "kernel_config_sha256": "c9285c74903ca3f1e54a0723ddf3cd3f1631eff80daab6504573e5e1eb909cf6",
+        "kernel_patches_sha256": "b72037a7261e105d68cbb66aa4ae40c9ef6ea4601ca3abd9a90c7ae351e7a539",
+        "opensbi": "1.6",
+        "rootfs_tree_sha256": "3b83fa4a43cd9dcdc3f149d7718d2cd89f57acaad628753d1d4c35f9f46638eb",
+        "sha": "ad297bf9",
+        "stage0_sha256": "7612bfc5afe8f79341d051a4d6a860d5292f340befb7efd14a53acdae18c183e",
+        "static_id": "0x44EE76D5",
+        "variant": "default",
+        "ver32": "0x01000000"
+      },
+      "greybox_clear": {
+        "installed_at": "/etc/mps3/greybox_clear.bin",
+        "name": "config_rm_greybox_pblock_rp_dut_partial_clear.bin",
+        "sha256": "d51c5ac91ac4ad2f98e6eb72d1b81ad2dedb79f0c911e10d1f360fbd56d9405d",
+        "static_id": "0x44EE76D5"
+      },
+      "legal_info": {
+        "bytes": 207953920,
+        "name": "linux_legal_info.tar",
+        "sha256": "5ae61c197d2578185c62b732e76e5e50d153aabd96fec65b08f876737c562375"
+      },
+      "legal_info_reason": null,
+      "overlays": [
+        {
+          "clearing_crc32": "0xa9dc06f1",
+          "partial_crc32": "0x222acc64",
+          "rm_id": "0x00010007",
+          "rm_name": "clcd_demo",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0xfefc8722",
+          "partial_crc32": "0xd5d458fc",
+          "rm_id": "0x01000009",
+          "rm_name": "dbg_demo",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0xca461b1f",
+          "partial_crc32": "0x2f5cc762",
+          "rm_id": "0x01000002",
+          "rm_name": "eth_ss",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0xa45fb65c",
+          "partial_crc32": "0xf5470481",
+          "rm_id": "0x00000000",
+          "rm_name": "greybox",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0x457c6501",
+          "partial_crc32": "0x62c0860c",
+          "rm_id": "0x0100001E",
+          "rm_name": "led",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0x77ccef0f",
+          "partial_crc32": "0x930eb9ea",
+          "rm_id": "0x01000001",
+          "rm_name": "nanosoc",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0x424b488a",
+          "partial_crc32": "0x10a91f36",
+          "rm_id": "0x0100000A",
+          "rm_name": "nanosoc_ila",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0x59c0a949",
+          "partial_crc32": "0x32605408",
+          "rm_id": "0x01000003",
+          "rm_name": "nanosoc_multicore",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0x4aa09f14",
+          "partial_crc32": "0xba4292b0",
+          "rm_id": "0x01000005",
+          "rm_name": "nanosoc_upy",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0x01b86c34",
+          "partial_crc32": "0x5dc4c351",
+          "rm_id": "0x010000A1",
+          "rm_name": "regdemo_a",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0xab8e2c02",
+          "partial_crc32": "0xcdd907e9",
+          "rm_id": "0x010000B2",
+          "rm_name": "regdemo_b",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0x263eba76",
+          "partial_crc32": "0x09484602",
+          "rm_id": "0x01000006",
+          "rm_name": "socscope",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        },
+        {
+          "clearing_crc32": "0x663e3a38",
+          "partial_crc32": "0x7fd5d1bd",
+          "rm_id": "0x01000004",
+          "rm_name": "uart_echo",
+          "static_id": "0x44EE76D5",
+          "static_usercode": "0xFB1F8C76"
+        }
+      ],
+      "provisioned": {
+        "sidecar": "version",
+        "static_id": "0x44EE76D5"
+      },
+      "slot_image": {
+        "bytes": 29447688,
+        "crc32": "0x9BFF053B",
+        "format": "s0lb",
+        "name": "linux_slot.img",
+        "s0lb": {
+          "entry_a0": "0x00000000",
+          "entry_a1": "0x00000000",
+          "entry_pc": "0x80000000",
+          "header_crc32": "0x5CEAED1B",
+          "num_entries": 1,
+          "regions": [
+            {
+              "crc32": "0x0D9C910F",
+              "dst": "0x80000000",
+              "len": 29443592
+            }
+          ],
+          "version": 2
+        },
+        "sha256": "05c83617bfac30c6c66a09dc946b2243cb9112692a9afa2d8352bcba054569ea",
+        "source": {
+          "bytes": 29443592,
+          "name": "fw_payload_1region.bin",
+          "sha256": "919a9880a1a6e17f44d573fe6930d542b866202d468dc75bb1e2a9d29622f9df",
+          "wrapped_by": "stage0_pack.py 1-region pc=0x80000000 a1=0"
+        }
+      },
+      "what": "everything a running harness takes over the network without touching the MCC SD: the user-uSD slot image, the overlays, this manifest, and the legal-info that travels with the image."
+    },
+    "mcc_sd": {
+      "flashable_bit": {
+        "bytes": 13880333,
+        "name": "config_rm_greybox_stage0.bit",
+        "sha256": "f876e73e412c35b65130a7966819d63cce3ec1f5aa5b6e8f9838f43c7a9660ba"
+      },
+      "stage0": {
+        "baked_constants": {
+          "mps3_stage0_static_id": "0x44EE76D5",
+          "mps3_stage0_ver32": "0x01000000"
+        },
+        "identity_checked": true,
+        "name": "stage0_field_b1.elf",
+        "sha256": "7612bfc5afe8f79341d051a4d6a860d5292f340befb7efd14a53acdae18c183e"
+      },
+      "static_ltx": {
+        "name": "config_rm_greybox_static.ltx",
+        "sha256": "a1be5b9b55023398d0be03e2a34cf3d65286e93dc9fe8c32cc0f0f4983522e54",
+        "sidecar": "config_rm_greybox_static.ltx.json",
+        "sidecar_sha256": "e85958517216a373bac5ee0221266bce2a8220de61f9e96a1d3bc265c9f0cee3",
+        "uuids": [
+          "35988F4F3335580E8082F08D4B627CD0"
+        ]
+      },
+      "what": "the FPGA configuration the MCC loads from its config SD at power-on: the static with stage0 baked into the MBV LMB. Changes only with a mint or a stage0 re-bake."
+    }
+  }
+}

@@ -1,0 +1,39 @@
+#!/bin/sh
+#
+# S13mps3identity -- resolve THIS board's identity (label, hostname, IP, MAC)
+# once per boot, before anything uses it (lane IDENT; the model is
+# src/linux_harness/sw/harnessd/identity_core.h):
+#
+#   per field: /persist/etc/mps3/identity (the override; only on a card-backed
+#   /persist) > the stage0 status block (the per-board bake, read through the
+#   LMB-tail UIO page) > the image default (MPS3, 192.168.10.101/24,
+#   02:00:00:4d:50:53) -> /run/mps3/identity, with a source per field.
+#
+# After S12mps3persist (the override lives on /persist; its persist.state says
+# whether /persist is the card) and before S41mps3net (which sets the eth0 MAC
+# BEFORE link up, the static IP and the hostname from the result). mps3-harnessd
+# reads the same file for the CLCD, identify and the `identity` verb.
+#
+# It never stops the boot: if the resolver is missing or fails, S41mps3net and
+# harnessd fall back to the image defaults on their own.
+
+RUN=/run/mps3
+BIN=/usr/sbin/mps3-identity
+
+case "$1" in
+    start)
+        mkdir -p "$RUN"
+        if [ -x "$BIN" ]; then
+            "$BIN" resolve || echo "mps3identity: resolver failed (rc $?): image defaults apply"
+        else
+            echo "mps3identity: $BIN missing: image defaults apply"
+        fi
+        ;;
+    stop|restart|reload)
+        ;;
+    *)
+        echo "Usage: $0 {start|stop}"
+        exit 1
+        ;;
+esac
+exit 0

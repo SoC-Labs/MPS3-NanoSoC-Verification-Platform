@@ -1,0 +1,139 @@
+# ============================================================================
+# Buildroot defconfig: the MPS3 Linux harness image (MicroBlaze V, rv32imac).
+# IMAGE_CONTRACT.md is the spec; build.sh is the only supported entry point
+# (it adds the idle/variant fragments, the root password and BR2_JLEVEL).
+#
+# VARIANT of the PROVEN ../../linux_soc/linux/configs/mbv_linux_defconfig
+# (untouched; still the linux_soc image). Deltas here:
+#   * kernel fragments: the linux_soc base (uartlite/intc/soclabs-mbv timer)
+#     + the harness delta (smsc911x, uSD, UIO, pstore; NO driver for any
+#     harnessd-owned block) + SLIM (default: the 1-region blob needs it;
+#     STRICT_KERNEL_RWX off — no kernel W^X) + NOWFI (build.sh, default)
+#   * the rootfs is EMBEDDED in the kernel (BR2_TARGET_ROOTFS_INITRAMFS): one
+#     Image serves QEMU, the 3-region xsdb boot and the 1-region blob, and
+#     there is no initrd-end to stamp any more
+#   * mps3-harnessd (inittab respawn) + spi-usd.ko; dropbear (key-only,
+#     per-board first-boot host key); e2fsprogs for /persist
+#   * every path is relative to this external tree ($(BR2_EXTERNAL_…_PATH)),
+#     so the defconfig works in any worktree (the July one hard-coded the
+#     mps3-nanosoc-platform-linux worktree)
+#
+# Everything below the ISA block is inherited VERBATIM from the proven
+# defconfig — every comment there (F/D landmine, wrapper toolchain, merged
+# /usr, sunrpc) still applies.
+# ============================================================================
+
+BR2_riscv=y
+BR2_RISCV_32=y
+
+# MUST be "custom": BR2_riscv_g would `select` F/D, which illegal-instruction
+# -traps on the FPU-less core while booting fine on qemu-virt (the F/D
+# landmine). build.sh asserts rv32imac/ilp32 before it compiles anything.
+BR2_riscv_custom=y
+BR2_RISCV_ISA_RVM=y
+BR2_RISCV_ISA_RVA=y
+BR2_RISCV_ISA_RVC=y
+BR2_RISCV_ABI_ILP32=y
+BR2_RISCV_USE_MMU=y
+# BR2_RISCV_ISA_RVF is not set
+# BR2_RISCV_ISA_RVD is not set
+
+# --- External (vendor, pre-built) toolchain via the local wrapper ---------
+# build.sh generates the wrapper into sw/build/toolchain_wrapper (running a
+# copy of linux_soc/linux/mk_toolchain_wrapper.sh there).
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
+BR2_TOOLCHAIN_EXTERNAL_PREINSTALLED=y
+BR2_TOOLCHAIN_EXTERNAL_PATH="$(BR2_EXTERNAL_MPS3_HARNESS_PATH)/../build/toolchain_wrapper"
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX="riscv32-amd-linux-gnu"
+BR2_TOOLCHAIN_EXTERNAL_GCC_13=y
+BR2_TOOLCHAIN_EXTERNAL_HEADERS_6_6=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM_GLIBC=y
+BR2_TOOLCHAIN_EXTERNAL_HAS_SSP=y
+BR2_TOOLCHAIN_EXTERNAL_CXX=y
+# BR2_TOOLCHAIN_EXTERNAL_INET_RPC is not set
+
+# --- Patches ---------------------------------------------------------------
+# sw/patches/linux: 0001 uartlite poll mode (DT-gated, inert), 0002 no-wfi idle
+# (Kconfig, default n; the nowfi fragment sets it), 0003 the soclabs-mbv AXI
+# timer clockevent (errata E1/E2), 0004 uartlite In1 race, 0006 smsc911x PHY
+# self-test result ignored, 0007 udelay off the frozen rdtime. sw/patches/
+# opensbi: the xlnx-tmrctr M-mode timer (DT-gated, inert). The diagnostic
+# 0005 lives in sw/patches/diag/ and is NOT applied.
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_MPS3_HARNESS_PATH)/../patches"
+
+# --- Kernel ---------------------------------------------------------------
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.18.7"
+BR2_LINUX_KERNEL_USE_DEFCONFIG=y
+BR2_LINUX_KERNEL_DEFCONFIG="rv32"
+# Fragment stack, in order: linux_soc base, harness delta, slim. build.sh
+# appends kernel_fragment_harness_nowfi.config (MPS3_IDLE=nowfi, default) and
+# kernel_fragment_harness_legacy.config (MPS3_VARIANT=legacy).
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_MPS3_HARNESS_PATH)/../../../linux_soc/linux/configs/kernel_fragment.config $(BR2_EXTERNAL_MPS3_HARNESS_PATH)/../configs/kernel_fragment_harness.config $(BR2_EXTERNAL_MPS3_HARNESS_PATH)/../configs/kernel_fragment_harness_slim.config"
+BR2_LINUX_KERNEL_IMAGE=y
+
+# --- System ---------------------------------------------------------------
+BR2_TARGET_GENERIC_HOSTNAME="mps3-harness"
+BR2_TARGET_GENERIC_ISSUE="MPS3 harness Linux (SoCLabs, MicroBlaze V)"
+# The serial console getty (tty_02 on the hub): the ONLY place the root
+# password works (dropbear runs -s). mps3-unclaim is run from here.
+BR2_TARGET_GENERIC_GETTY_PORT="console"
+# Root password: PROVISIONED AT BUILD TIME by build.sh ($MPS3_ROOT_PASSWD, or a
+# random one recorded to artifacts/ROOT_PASSWD), never a committed secret.
+BR2_TARGET_GENERIC_ROOT_PASSWD=""
+BR2_ROOTFS_MERGED_USR=y
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_MPS3_HARNESS_PATH)/rootfs_overlay"
+# Post-build: provisioning seams, then the IMAGE TAIL (dropbear hardening, the
+# release host-key gate, the inittab.d merge, /etc/mps3/version).
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_MPS3_HARNESS_PATH)/board/mps3_provision.sh"
+
+# --- Rootfs ---------------------------------------------------------------
+# EMBEDDED initramfs: Buildroot builds rootfs.cpio after every package (kernel
+# modules included — the July mk_1region.sh blob had NONE) and then rebuilds the
+# kernel with it. rootfs.cpio.gz is kept as a standalone copy for inspection.
+BR2_TARGET_ROOTFS_CPIO=y
+BR2_TARGET_ROOTFS_CPIO_GZIP=y
+BR2_TARGET_ROOTFS_INITRAMFS=y
+# BR2_TARGET_ROOTFS_TAR is not set
+
+# --- Packages: harness userland -------------------------------------------
+# sshd: dropbear (key-only; per-board ed25519 host key generated on first boot
+# by S12mps3persist). OpenSSH would drag openssl for no requirement.
+BR2_PACKAGE_DROPBEAR=y
+# The harness process: the firmware services as one Linux process (DL6),
+# supervised by inittab respawn (package/mps3-harnessd, HARNESSD lane).
+BR2_PACKAGE_MPS3_HARNESSD=y
+# The user-microSD controller (spi-usd.ko), loaded by S11modules.
+BR2_PACKAGE_MPS3_SPI_USD=y
+# mps3-slot: stage0's card layout from Linux — boot-select sector (power-safe,
+# lower-seq copy with max+1) and checked slot-image writes (STAGE0_CONTRACT §6).
+BR2_PACKAGE_MPS3_SLOT=y
+# /persist: e2fsck at mount, mkfs.ext4 for `mps3-persist format`.
+BR2_PACKAGE_E2FSPROGS=y
+# THE ON-BOARD GDB SERVER (MVP 6 Oct): /usr/bin/mps3-debug + Buildroot's openocd
+# (selected) with remote_bitbang and the SoC Labs ahb_qspi + hostio4 drivers
+# (sw/patches/openocd), the host/openocd configs, the `openocd` user. OpenOCD dials
+# the harness's own 127.0.0.1:6921 -- no harnessd change. Every USB adapter is off
+# (the per-adapter options below stay unset; there is no libusb in the image).
+BR2_PACKAGE_MPS3_DEBUG=y
+BR2_PACKAGE_OPENOCD=y
+# WireGuard userland (wg) + the full iproute2 `ip` (busybox ip cannot create
+# `type wireguard` links; S41mps3net also uses it for the .101 secondary).
+BR2_PACKAGE_WIREGUARD_TOOLS=y
+BR2_PACKAGE_IPROUTE2=y
+# LEGACY variant only (build.sh MPS3_VARIANT=legacy flips these on and
+# BR2_PACKAGE_MPS3_HARNESSD off): mps3-legacy-daemons, mps3-dfx, mps3-apps.
+# BR2_PACKAGE_MPS3_LEGACY_DAEMONS is not set
+# BR2_PACKAGE_MPS3_DFX is not set
+# BR2_PACKAGE_MPS3_APPS is not set
+
+# --- Firmware: OpenSBI -----------------------------------------------------
+# fw_jump for QEMU / the 3-region xsdb boot; build.sh wraps Image + the DTB into
+# the 1-region FW_PAYLOAD itself (Buildroot's own payload would embed the
+# pre-initramfs kernel).
+BR2_TARGET_OPENSBI=y
+BR2_TARGET_OPENSBI_CUSTOM_VERSION=y
+BR2_TARGET_OPENSBI_CUSTOM_VERSION_VALUE="1.6"
+BR2_TARGET_OPENSBI_PLAT="generic"

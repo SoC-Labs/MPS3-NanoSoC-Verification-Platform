@@ -1,0 +1,210 @@
+{
+  "schema": "mps3-mint-record",
+  "schema_version": "1.1",
+  "record_kind": "mint",
+  "generated_at": "2026-09-10T04:12:07Z",
+  "generated_by": "fpga/dfx/tools/mint_record.py",
+  "static_id": "0x5F3A19C2",
+  "build_dir": "fpga/dfx/build_example/prod",
+  "shell_proj": {
+    "value": "build/shell_proj_example",
+    "reason": null
+  },
+  "rm_set": [
+    "rm_greybox",
+    "rm_led",
+    "rm_nanosoc",
+    "rm_socscope"
+  ],
+  "static_canon": {
+    "value": {
+      "schema": "mps3-static-canon",
+      "schema_version": "1",
+      "digest": "1ba936a2023883a39385569043b129b2b4e0c4e29970228c5dd23449d0c9ff31",
+      "short": "1ba936a20238",
+      "part": "xcku115-flvb1760-1-c",
+      "vivado": "2024.1",
+      "flags": {
+        "SHELL_TOUCH": "1",
+        "SHELL_REALPHY": "0"
+      },
+      "input_count": 36,
+      "manifest_bytes": 3413,
+      "inputs": [
+        {
+          "path": "fpga/shell/shell_top.sv",
+          "sha256": "0f2e6cb0d9a441c7fbb4b6f3f5b9a2b1c8d0e7a4359216fd8c0b7e3a1d54f902"
+        },
+        {
+          "path": "... one row per declared input, sorted by path; 36 of them in a real record ...",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "linked_static_dcp": {
+        "name": "shell_static_synth.dcp",
+        "sha256": "5b1d0c8e4a7f2936d1c4b8e05f37a29c6e0d4b81f3a9725c6d0e8b4a31f70c5d",
+        "bytes": 5431147,
+        "note": "the shell checkpoint this DFX run linked against; RECORDED, NOT HASHED -- it is a timestamped artefact and hashing it would reintroduce the defect static_canon removes"
+      }
+    },
+    "reason": null
+  },
+  "static_usercode": {
+    "value": {
+      "usercode": "0x875DB8BB",
+      "usr_access": {
+        "value": "0x01000001",
+        "reason": null
+      },
+      "harness_version": {
+        "value": "1.0.0",
+        "reason": null
+      },
+      "source": "config_rm_greybox.bit header UserID= (agrees with static_stamp.json)"
+    },
+    "reason": null
+  },
+  "sources": {
+    "repo": {
+      "value": {
+        "sha": "48e88660a1c4a5e2f0d7b3319c6a2e5d81f40cb7",
+        "dirty": false
+      },
+      "reason": null
+    },
+    "nanosoc_m0_soc": {
+      "value": {
+        "sha": "69dce94aa1b0c3d47f2e8b5619ad30cc7e4f1b28",
+        "dirty": false
+      },
+      "reason": null
+    },
+    "socscope": {
+      "value": null,
+      "reason": "the SoCScope RM source tree (SOCSCOPE_HOME) was not passed to this record, so nothing here knows which revision was read"
+    }
+  },
+  "reused_dcps": {
+    "value": {
+      "from": "fpga/dfx/build_previous/prod",
+      "checkpoints": [
+        "rm_nanosoc_synth.dcp"
+      ],
+      "note": "these RM checkpoints were COPIED IN, not synthesised by this run; their provenance is that tree's synth logs, not this record"
+    },
+    "reason": null
+  },
+  "firmware": {
+    "flags": {
+      "value": {
+        "PRODUCT": "1",
+        "CLCD": "1",
+        "CLCD_KVM": "1",
+        "HWICAP_FIFO": "1",
+        "WINDOWED": "1",
+        "TOUCH": "1"
+      },
+      "reason": null
+    },
+    "product": {
+      "value": true,
+      "reason": null
+    },
+    "elf": {
+      "value": {
+        "name": "shell_fw.elf",
+        "md5": "6f1ed002ab5595859014ebf0951522d9",
+        "bytes": 231884
+      },
+      "reason": null
+    }
+  },
+  "dcps": [
+    {
+      "name": "static_routed_locked.dcp",
+      "md5": "088fac2695d8407cee4607be9f305a28",
+      "bytes": 9579088,
+      "mtime": "2026-09-10T02:59:11Z"
+    },
+    {
+      "name": "config_rm_greybox_routed.dcp",
+      "md5": "33327b59505a1f12f68bb7ca4246224c",
+      "bytes": 10363096,
+      "mtime": "2026-09-10T02:58:40Z"
+    },
+    {
+      "name": "shell_static_synth.dcp",
+      "md5": "4e7434a3c45acb12abf8b648506cf2e6",
+      "bytes": 5431147,
+      "mtime": "2026-09-10T00:28:03Z"
+    }
+  ],
+  "artefacts": [
+    {
+      "name": "config_rm_greybox.bit",
+      "md5": "94853a897c56fa673cb1f70bbcaae2f0",
+      "bytes": 11138390,
+      "mtime": "2026-09-10T04:05:22Z"
+    },
+    {
+      "name": "config_rm_greybox_fw.bit",
+      "md5": "b026324c6904b2a9cb4b88d6d61c81d1",
+      "bytes": 11138390,
+      "mtime": "2026-09-10T04:11:50Z"
+    },
+    {
+      "name": "config_rm_greybox.mmi",
+      "md5": "87ebf1f2a83f80082d750ab2cafeed0a",
+      "bytes": 74569,
+      "mtime": "2026-09-10T04:10:33Z"
+    },
+    {
+      "name": "shell_harness.xsa",
+      "md5": "f53d515f79a33f444032095d84e711a7",
+      "bytes": 1111621,
+      "mtime": "2026-09-10T00:42:15Z"
+    }
+  ],
+  "overlay_inputs": [
+    {
+      "rm_key": "rm_greybox",
+      "rm_name": "greybox",
+      "rm_id": "0x00000000",
+      "partial": "config_rm_greybox_pblock_rp_dut_partial.bin",
+      "clearing": "config_rm_greybox_pblock_rp_dut_partial_clear.bin"
+    },
+    {
+      "rm_key": "rm_led",
+      "rm_name": "led",
+      "rm_id": "0x0100001E",
+      "partial": "config_rm_led_pblock_rp_dut_partial.bin",
+      "clearing": "config_rm_led_pblock_rp_dut_partial_clear.bin"
+    },
+    {
+      "rm_key": "rm_nanosoc",
+      "rm_name": "nanosoc",
+      "rm_id": "0x01000001",
+      "partial": "config_rm_nanosoc_pblock_rp_dut_partial.bin",
+      "clearing": "config_rm_nanosoc_pblock_rp_dut_partial_clear.bin"
+    },
+    {
+      "rm_key": "rm_socscope",
+      "rm_name": "socscope",
+      "rm_id": "0x01000006",
+      "partial": "config_rm_socscope_pblock_rp_dut_partial.bin",
+      "clearing": "config_rm_socscope_pblock_rp_dut_partial_clear.bin"
+    }
+  ],
+  "timestamps": {
+    "static_id_txt": "2026-09-10T02:59:14Z",
+    "overlay_inputs_txt": "2026-09-10T04:05:31Z",
+    "static_routed_locked_dcp": "2026-09-10T02:59:11Z"
+  },
+  "tools": {
+    "vivado": {
+      "value": "2024.1",
+      "reason": null
+    }
+  },
+  "integrity": {}
+}

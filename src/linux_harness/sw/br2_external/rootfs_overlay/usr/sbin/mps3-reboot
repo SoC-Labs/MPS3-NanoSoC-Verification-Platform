@@ -1,0 +1,26 @@
+#!/bin/sh
+#
+# mps3-reboot — reboot THIS board (IMAGE_CONTRACT §7.3).
+#
+# A plain `reboot` does not reset the MPS3: the MicroBlaze V has no SBI
+# system-reset device, so the kernel's restart path spins, and init's SIGTERM
+# makes harnessd disarm the watchdog on its way out (HARNESSD_CONTRACT §5.3).
+# The board's reset is the WDOG, which harnessd (or stage0) armed. So:
+#   sync, /persist read-only, then SIGSTOP harnessd (no more kicks) and let
+#   the WDOG reset the MBV + stage0. On the MBV static a stalled kick resets
+#   21.5-42.9 s later (C_WDT_INTERVAL=31, SHELL_CONTRACT §6), so wait up to
+#   MPS3_REBOOT_WAIT (45 s) before falling back to `reboot -f` — which is what
+#   resets QEMU (no harnessd there), and which on the board spins until the
+#   WDOG fires anyway.
+
+sync
+mount -o remount,ro /persist 2>/dev/null
+sync
+pid=$(pidof mps3-harnessd 2>/dev/null)
+if [ -n "$pid" ]; then
+    echo "mps3-reboot: stopping mps3-harnessd ($pid) — the watchdog resets the board"
+    kill -STOP $pid
+    sleep "${MPS3_REBOOT_WAIT:-45}"
+    echo "mps3-reboot: no watchdog reset after ${MPS3_REBOOT_WAIT:-45} s (WDOG not armed?) — reboot -f"
+fi
+exec reboot -f

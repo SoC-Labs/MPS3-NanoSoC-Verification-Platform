@@ -1,0 +1,11 @@
+sim_build/
+__pycache__/
+results.xml
+*.vcd
+*.log
+ucli.key
+csrc*/
+simv*
+novas.*
+verdi*
+*.daidir

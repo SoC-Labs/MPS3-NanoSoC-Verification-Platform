@@ -1,0 +1,48 @@
+#!/bin/sh
+#
+# S15pstore — diag-mailbox successor plumbing (DRIVER_MATRIX §2.11).
+#
+# The LMB/MDM JTAG diag mailbox dies with the LMB; its replacement is
+# ramoops/pstore in the top 1 MiB of DDR (shell_linux.dts
+# reserved-memory/ramoops@bff00000, kernel fragment CONFIG_PSTORE_RAM/
+# CONFIG_PSTORE_CONSOLE). This script:
+#   1. mounts the pstore filesystem (records from the PREVIOUS boot appear
+#      here after a panic/warm reset),
+#   2. preserves any previous-boot records to /var/log/pstore.prev/ so the
+#      ram-backed slots free up for the next crash,
+#   3. stamps a boot marker into /dev/pmsg0 — the userspace pstore channel
+#      that replaces the "diag mailbox republished every superloop pass"
+#      role: daemons/tools can append triage state that survives a warm
+#      reset and is XSDB-readable at 0xBFF0_0000 while the box is wedged.
+#
+# HONEST BOUNDARY (DRIVER_MATRIX §2.11 risk note): calibrated DDR survives
+# a CPU-only warm reset, NOT a full POR or a shell reprogram — ramoops is
+# weaker than the old BRAM mailbox across power events. The XSDB
+# read-while-wedged path is a BOARD-ONLY proof, still open (matrix item 7).
+
+case "$1" in
+    start)
+        if ! mountpoint -q /sys/fs/pstore 2>/dev/null; then
+            mount -t pstore pstore /sys/fs/pstore 2>/dev/null \
+                || { echo "pstore: mount failed (CONFIG_PSTORE missing?)"; exit 0; }
+        fi
+        # preserve previous-boot records, freeing the ram slots
+        if ls /sys/fs/pstore/* >/dev/null 2>&1; then
+            mkdir -p /var/log/pstore.prev
+            cp /sys/fs/pstore/* /var/log/pstore.prev/ 2>/dev/null
+            rm -f /sys/fs/pstore/*
+            echo "pstore: previous-boot records saved to /var/log/pstore.prev"
+        fi
+        # boot marker into the pmsg record (diag-mailbox successor channel)
+        if [ -e /dev/pmsg0 ]; then
+            {
+                printf 'MPS3-BOOT ts=%s static_id=%s\n' \
+                    "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')" \
+                    "$(cat /etc/mps3/static_id 2>/dev/null || echo '?')"
+            } > /dev/pmsg0 2>/dev/null
+        fi
+        ;;
+    stop) ;;
+    *) echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac
+exit 0

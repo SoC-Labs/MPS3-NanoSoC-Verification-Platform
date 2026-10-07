@@ -1,0 +1,68 @@
+# /etc/mps3/wg0.conf.template — documented shape of the wg0 WireGuard config.
+#
+# wg0 is the harness's WireGuard transport: it joins the fpgahub mesh as a
+# PEER (docs/HARDWARE_HUB_INTEGRATION.md — wg0 is transport only; the MPS3 is
+# a full Edge Device API endpoint that rides this tunnel). S42mps3wg brings it
+# up at boot, after S41mps3net (eth0) and before S90mps3d (the control plane
+# binds the mesh address).
+#
+# THIS FILE IS A TEMPLATE. Nothing reads it at runtime — it is never brought
+# up directly. It exists as (1) the documented shape of the config and (2) the
+# source-of-truth the provisioning hook renders from. The REAL config is baked
+# at provision time into TWO files (same secrets seam as static_id / the root
+# password — a real key is NEVER committed here, this template ships only
+# placeholder tokens):
+#
+#   /etc/wireguard/wg0.conf   (mode 0600)  — `wg setconf` format, body below
+#   /etc/mps3/wg0.addr        (mode 0644)  — one line, the wg0 interface
+#                                            address in CIDR form, e.g.
+#                                            10.99.0.5/32
+#
+# The address lives in its OWN file, NOT in the [Interface] block below,
+# because `wg setconf` parses ONLY the cryptographic/peer config and REJECTS
+# an `Address =` key (that key is a wg-quick-only extension). S42mps3wg reads
+# wg0.addr and applies it with `ip address add`.
+#
+# On an UNPROVISIONED image the provisioning hook writes NEITHER file, so
+# neither /etc/wireguard/wg0.conf nor /etc/mps3/wg0.addr exists — S42mps3wg's
+# presence-check on wg0.conf is then a clean boot-time no-op.
+#
+# PROVISIONING (image bake, same idiom as static_id / ROOT_PASSWD): the
+# Buildroot post-build hook (br2_external/board/mps3_provision.sh) renders the
+# real files from MPS3_WG_* env vars set on the build, substituting the tokens:
+#
+#   @MPS3_WG_PRIVKEY@              -> [Interface] PrivateKey  (baked, SECRET)
+#   @MPS3_WG_PEER_PUBKEY@         -> [Peer]      PublicKey    (hub decision)
+#   @MPS3_WG_ENDPOINT@           -> [Peer]      Endpoint     (hub decision)
+#   @MPS3_WG_ALLOWED_IPS@       -> [Peer]      AllowedIPs   (hub decision)
+#   @MPS3_WG_PERSISTENT_KEEPALIVE@ -> [Peer]  PersistentKeepalive
+#
+#   @MPS3_WG_ADDRESS@             -> /etc/mps3/wg0.addr (this board's mesh
+#                                    address; NOT rendered into [Interface],
+#                                    see the `wg setconf` note above)
+#
+# Unset MPS3_WG_* => nothing is baked => unprovisioned image (no tunnel).
+#
+# ---------------------------------------------------------------------------
+# FOUR HUB-SIDE VALUES ARE DECISIONS THE HUB OWNER MUST SUPPLY AT PROVISION:
+#   - the peer public key       (@MPS3_WG_PEER_PUBKEY@)
+#   - the peer endpoint host:port (@MPS3_WG_ENDPOINT@)
+#   - the peer allowed-ips       (@MPS3_WG_ALLOWED_IPS@ — the mesh CIDR[s])
+#   - this board's mesh address  (@MPS3_WG_ADDRESS@ — its /32 in the hub range)
+# See docs/HANDOVER_WIREGUARD.md §4 (DECISIONS NEEDED FROM USER) and
+# docs/contracts/OPEN_ISSUES.md I3 (Hardware Hub integration).
+# ---------------------------------------------------------------------------
+#
+# `wg setconf`-format body (this is what gets baked to /etc/wireguard/wg0.conf):
+#
+# [Interface]
+# PrivateKey = @MPS3_WG_PRIVKEY@
+#
+# [Peer]
+# PublicKey = @MPS3_WG_PEER_PUBKEY@
+# Endpoint = @MPS3_WG_ENDPOINT@
+# AllowedIPs = @MPS3_WG_ALLOWED_IPS@
+# PersistentKeepalive = @MPS3_WG_PERSISTENT_KEEPALIVE@
+#
+# (and, separately, baked to /etc/mps3/wg0.addr as a single CIDR line:)
+# @MPS3_WG_ADDRESS@

@@ -1,0 +1,2 @@
+# harness process placeholder — installed only while no mps3-harnessd drop-in exists
+::respawn:/usr/libexec/mps3/harnessd-placeholder

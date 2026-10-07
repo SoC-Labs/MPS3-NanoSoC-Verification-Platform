@@ -1,0 +1,68 @@
+tests/lan8720_rmii_echo -- the DUT MAC's RMII path against a REAL LAN8720 model
+==============================================================================
+DUT   : ethmac_ahb_rmii (OpenCores ethmac + eth_miim MDIO master + rmii_to_mii)
+        -- the SAME real MAC + RMII bridge the rm_eth_ss RM instantiates.
+PHY   : tests/lan8720_rmii_echo/lan8720_model.sv  (a REAL LAN8720 behavioral
+        model: RMII + near-end loopback + Clause-22 MDIO with the correct
+        turnaround) -- NOT fpga/ethernet/mdio_phy_model.
+DRIVER: cocotb 2.0.1 = the "firmware": AHB register slave via
+        tests/common/ahb_lite.py; DMA master answered by the TB's SV slave RAM
+        (cocotb reads/writes it hierarchically); frames in/out at the RMII pads.
+SIM   : VCS T-2022.06-SP2 (Icarus is not viable for the OpenCores MAC; VCS is
+        the repo's proven combo -- set_env.sh).
+
+COMMAND
+  source <repo-root>/set_env.sh          # miniconda py3.10 + cocotb 2.0.1 + VCS
+  make -C tests/lan8720_rmii_echo         # default 100 Mbps run
+  make -C tests/lan8720_rmii_echo guard   # +MODE_SPEED=0 (mode_speed guard)
+
+RESULT -- default run (mode_speed=1 => 100 Mbps): TESTS=5 PASS=5 FAIL=0
+  MODER reset default = 0x0000a000
+  MDIO PHYID1=0x0007 PHYID2=0xc0f1 ANAR=0x01e1
+  RX BD filled: len=64 status=0x6000 int_o=1
+  RX header byte-exact through rmii_to_mii + real MAC.
+  ECHO: RX len=64 status=0x6080, TX BD RD=0, tx_frames=1
+  ECHO round trip OK: frame TX'd, PHY-looped, RX'd byte-exact.
+  mode_speed wired: TB drives 1; rm_eth_ss connects .mode_speed(MODE_SPEED_100)
+
+  ** test_reset_and_moder           PASS    -- AHB path sane
+  ** test_mdio_phyid                PASS    -- LAN8720 IDs read via eth_miim
+  ** test_rx_external_arp           PASS    -- ARP frame at the pads RECEIVED
+  ** test_echo_loopback_roundtrip   PASS    -- MAC TX -> PHY -> MAC RX ECHOED
+  ** test_mode_speed_wired          PASS    -- mode_speed driven + RM wires it
+
+RESULT -- guard run (make guard, +MODE_SPEED=0): TESTS=5 PASS=5 FAIL=0
+  mode_speed=0: RX correctly did NOT complete (guard).
+  -> with the speed select tied 0, a 100 Mbps RMII stream can't be parsed and
+     RX dies. This is the exact multicore-wrapper bug (mode_speed left
+     unconnected -> tied 0 -> RX dead); the test asserts the negative.
+
+WHAT THIS PROVES
+  * A frame driven AT THE RMII PADS is RECEIVED byte-exact by the real MAC
+    through rmii_to_mii -> DMA (int_o asserts, RX BD fills, header matches).
+  * ECHO round trip: the MAC transmits a frame, the LAN8720 model loops it back
+    at the RMII pads (near-end loopback), and the SAME MAC receives it byte-exact
+    -- exercising BOTH rmii_to_mii directions (TX di-bit split; RX SFD nibble-
+    align + EOF CRS_DV ride-through) + real MAC TX-DMA and RX-DMA in one trip.
+  * The LAN8720 model's Clause-22 MDIO framing interoperates with the real
+    eth_miim master (PHYID reads back EXACT, no >>1 shift) -- the property
+    mdio_phy_model historically got wrong.
+  * mode_speed is load-bearing AND wired: the RM connects .mode_speed live.
+
+RX DI-BIT ORDER -- SINGLE-LAYER DISCIPLINE
+  The model + bench drive the RX di-bits in NATURAL {rxd1,rxd0} order with NO
+  software transpose. The board's rxd0<->rxd1 shield-lane swap lives in EXACTLY
+  ONE place -- the shell XDC pin map
+  (fpga/shell/constraints_realphy/mps3_realphy_pins.xdc). Sim has no shield/XDC,
+  so it must NOT re-apply the swap (a second swap re-creates the board's
+  0xA-preamble / no-lock failure).
+
+  *** THE RX PIN DIRECTION IS BOARD-GATED -- SIM CANNOT DECIDE IT. ***
+  There is no physical lane transpose in sim, so the datapath passes with EITHER
+  RXD[0]/RXD[1] pin assignment. The XDC currently uses RXD[0]->BA15 / RXD[1]->BA13
+  (the sibling ethernet-subsystem-ahb repo's committed order + module labels).
+  That direction is NOT proven here: the sibling's own measurement note says
+  "BA13 carries the PHY's RXD0" (which would instead require RXD[0]->BA13). The
+  on-silicon discriminator is the MII SFD: with the current pins the sibling read
+  SFD=0xD (+ broadcast DA); if a real board with THIS shell reads SFD=0xE, the
+  XDC must flip to RXD[0]->BA13. Confirm at bring-up.

@@ -1,0 +1,252 @@
+/*
+ * lscript.ld.in — MicroBlaze linker script TEMPLATE for the shell firmware
+ * (firmware/platform/Makefile substitutes @LMB_LENGTH@ from LMB_KB and
+ * writes build/lscript.ld). Shape = the canonical Vitis-generated
+ * MicroBlaze lscript.ld for a shared-I/D LMB BRAM system (vectors at
+ * 0x0..0x4F, everything else in one region from 0x50) — hand-carried here
+ * because the classic `app create` path (which would have generated it)
+ * requires an X-backed Vitis instance this headless flow deliberately
+ * avoids; see README.md "Build (repro)".
+ *
+ * Memory: the W-BD shell gives the MicroBlaze one 128 KiB shared I/D LMB
+ * BRAM at 0x0 (fpga/shell README address map). LMB_KB=256 builds against
+ * the documented one-parameter-doubling ASSUMPTION instead — that ELF
+ * cannot run until the BD's local_ram is actually doubled.
+ */
+
+/* STACK: 0x2000 (8 KiB) since diag v8 / net-proto v0.9.2. What sizes it is the
+ * control channel's reply path, ONE call chain deep. Measured 2026-09-24 (mb-gcc
+ * -Os -fstack-usage, the PRODUCT=1 flag set), bytes per frame:
+ *     main                            60
+ *     the superloop pass              40
+ *     coordinator_net_poll          2592   two `char line[MPS3_CTRL_RESP_MAX]`
+ *                                          (1280) scopes: mb-gcc does NOT
+ *                                          overlap them
+ *     coordinator_dispatch_line     2012   the request/response structs (the
+ *                                          response embeds the 256 B mailbox)
+ *     mps3_ctrl_encode_response     1112
+ *     sniprintf (newlib)            ~512   (library code: no .su, estimated)
+ *                                   ----
+ *                                   6328 of 8192 B -> 1864 B (~23 %) left for
+ *                                   whatever lwIP / an interrupt adds beneath.
+ * The arithmetic this comment used to carry (2*1280 + 256 + frames = ~2.9 KiB
+ * against the old 4 KiB) counted net_poll's buffers only: dispatch_line and
+ * encode_response stack ON TOP of them, so 4 KiB would overflow by ~2.1 KiB.
+ * Growing MPS3_CTRL_RESP_MAX (x2 in net_poll) or mps3_ctrl_response_t grows this
+ * chain: re-measure (-fstack-usage) before growing either. */
+_STACK_SIZE = DEFINED(_STACK_SIZE) ? _STACK_SIZE : 0x2000;
+_HEAP_SIZE  = DEFINED(_HEAP_SIZE)  ? _HEAP_SIZE  : 0x800;
+
+MEMORY
+{
+   /* Top 0x100 bytes are carved off the allocatable region for the fixed
+    * diagnostic mailbox (.mps3_diag) below — so its address never moves with
+    * code/.bss size. (0x100 since diag v8 grew the struct 0x80 -> 0x100 for the
+    * superloop service telemetry; 0x80 from v5 to v7, 0x40 before that. It
+    * stays anchored to the LMB end at @LMB_LENGTH@+0x50, so each growth moved
+    * the base DOWN. firmware/common/diag.h's _Static_assert on sizeof
+    * (mps3_diag_t) == 256 is what ties this reservation to the struct: change
+    * one without the other and the build stops.) */
+   local_lmb : ORIGIN = 0x50, LENGTH = @LMB_LENGTH@ - 0x100
+}
+
+ENTRY(_start)
+
+SECTIONS
+{
+.vectors.reset 0x0 : {
+   KEEP (*(.vectors.reset))
+}
+
+.vectors.sw_exception 0x8 : {
+   KEEP (*(.vectors.sw_exception))
+}
+
+.vectors.interrupt 0x10 : {
+   KEEP (*(.vectors.interrupt))
+}
+
+.vectors.hw_exception 0x20 : {
+   KEEP (*(.vectors.hw_exception))
+}
+
+.text : {
+   *(.text)
+   *(.text.*)
+   *(.gnu.linkonce.t.*)
+} > local_lmb
+
+.init : {
+   KEEP (*(.init))
+} > local_lmb
+
+.fini : {
+   KEEP (*(.fini))
+} > local_lmb
+
+.ctors : {
+   __CTOR_LIST__ = .;
+   ___CTORS_LIST___ = .;
+   KEEP (*crtbegin.o(.ctors))
+   KEEP (*(EXCLUDE_FILE(*crtend.o) .ctors))
+   KEEP (*(SORT(.ctors.*)))
+   KEEP (*(.ctors))
+   __CTOR_END__ = .;
+   ___CTORS_END___ = .;
+} > local_lmb
+
+.dtors : {
+   __DTOR_LIST__ = .;
+   ___DTORS_LIST___ = .;
+   KEEP (*crtbegin.o(.dtors))
+   KEEP (*(EXCLUDE_FILE(*crtend.o) .dtors))
+   KEEP (*(SORT(.dtors.*)))
+   KEEP (*(.dtors))
+   PROVIDE(__DTOR_END__ = .);
+   PROVIDE(___DTORS_END___ = .);
+} > local_lmb
+
+.rodata : {
+   __rodata_start = .;
+   *(.rodata)
+   *(.rodata.*)
+   *(.gnu.linkonce.r.*)
+   __rodata_end = .;
+} > local_lmb
+
+.sdata2 : {
+   . = ALIGN(8);
+   __sdata2_start = .;
+   *(.sdata2)
+   *(.sdata2.*)
+   *(.gnu.linkonce.s2.*)
+   . = ALIGN(8);
+   __sdata2_end = .;
+} > local_lmb
+
+.sbss2 : {
+   __sbss2_start = .;
+   *(.sbss2)
+   *(.sbss2.*)
+   *(.gnu.linkonce.sb2.*)
+   __sbss2_end = .;
+} > local_lmb
+
+.data : {
+   . = ALIGN(4);
+   __data_start = .;
+   *(.data)
+   *(.data.*)
+   *(.gnu.linkonce.d.*)
+   __data_end = .;
+} > local_lmb
+
+.got : {
+   *(.got)
+} > local_lmb
+
+.got1 : {
+   *(.got1)
+} > local_lmb
+
+.got2 : {
+   *(.got2)
+} > local_lmb
+
+.eh_frame : {
+   *(.eh_frame)
+} > local_lmb
+
+.jcr : {
+   *(.jcr)
+} > local_lmb
+
+.gcc_except_table : {
+   *(.gcc_except_table)
+} > local_lmb
+
+.sdata : {
+   . = ALIGN(8);
+   __sdata_start = .;
+   *(.sdata)
+   *(.sdata.*)
+   *(.gnu.linkonce.s.*)
+   __sdata_end = .;
+} > local_lmb
+
+.sbss (NOLOAD) : {
+   . = ALIGN(4);
+   __sbss_start = .;
+   *(.sbss)
+   *(.sbss.*)
+   *(.gnu.linkonce.sb.*)
+   . = ALIGN(8);
+   __sbss_end = .;
+} > local_lmb
+
+.tdata : {
+   __tdata_start = .;
+   *(.tdata)
+   *(.tdata.*)
+   *(.gnu.linkonce.td.*)
+   __tdata_end = .;
+} > local_lmb
+
+.tbss : {
+   __tbss_start = .;
+   *(.tbss)
+   *(.tbss.*)
+   *(.gnu.linkonce.tb.*)
+   __tbss_end = .;
+} > local_lmb
+
+.bss (NOLOAD) : {
+   . = ALIGN(4);
+   __bss_start = .;
+   *(.bss)
+   *(.bss.*)
+   *(.gnu.linkonce.b.*)
+   *(COMMON)
+   . = ALIGN(4);
+   __bss_end = .;
+} > local_lmb
+
+_SDA_BASE_ = __sdata_start + ((__sbss_end - __sdata_start) / 2 );
+
+_SDA2_BASE_ = __sdata2_start + ((__sbss2_end - __sdata2_start) / 2 );
+
+/* Heap and stack at the top of the region. */
+
+.heap (NOLOAD) : {
+   . = ALIGN(8);
+   _heap = .;
+   _heap_start = .;
+   . += _HEAP_SIZE;
+   _heap_end = .;
+} > local_lmb
+
+.stack (NOLOAD) : {
+   _stack_end = .;
+   . += _STACK_SIZE;
+   . = ALIGN(8);
+   _stack = .;
+   __stack = _stack;
+} > local_lmb
+
+_end = .;
+
+/* Fixed diagnostic mailbox — pinned at the top 0x100 bytes of the LMB, ABOVE
+ * the allocatable region (heap/stack live inside local_lmb, below this), so its
+ * address is constant regardless of code/.bss size. Read over JTAG-MDM after a
+ * wedge: base = 0x50 + @LMB_LENGTH@ - 0x100 (= 0x3FF00 for the 256 KiB LMB at
+ * diag v8 — was 0x3FF80 at 0x80 from v5, and 0x3FFC0 at 0x40 before that; the
+ * struct stays top-anchored to 0x40000, so each growth moves the base down).
+ * `mrd <base> 64` reads all 64 words. The field layout is diag.h's
+ * mps3_diag_t, and BOTH readers scan the …F00 and …F80 anchors so a board still
+ * running a 128-byte image is read correctly by this tree's tooling. NOLOAD:
+ * firmware stamps the magic + counters at runtime (mps3_diag_init), it is not
+ * part of the loaded image. */
+.mps3_diag (0x50 + @LMB_LENGTH@ - 0x100) (NOLOAD) : {
+   KEEP (*(.mps3_diag))
+}
+}

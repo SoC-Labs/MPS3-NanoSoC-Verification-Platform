@@ -1,0 +1,88 @@
+================================================================================
+eth_ss_ooc.xdc — OOC timing validation evidence
+Contract: docs/contracts/partition-timing.md v0.1
+Tool: Vivado 2024.1, part xcku115-flvb1760-1-c
+Run: OOC synth of rp_eth_ss_wrapper (fpga/rp/eth_ss/filelist.tcl sources),
+     report_timing_summary + report_clock_interaction BEFORE (clockless) and
+     AFTER read_xdc eth_ss_ooc.xdc, same synthesized netlist.
+Date: 2026-07-07 (A2, socketed-XDC delivery)
+================================================================================
+
+Synthesis: 0 errors, 0 critical warnings (eth_ss OOC synth is board-free /
+proven — see README.md). After the read_xdc: NO Designutils 20-1307 (the XDC
+is read_xdc-legal: no if/foreach/puts control-flow).
+
+--------------------------------------------------------------------------------
+BEFORE (no XDC — the state this contract fixes)
+--------------------------------------------------------------------------------
+  get_clocks            : (empty) — 0 clocks
+  report_timing_summary : "There are no user specified timing constraints."
+                          6375 unconstrained internal endpoints.
+  => the RM's internal register-to-register timing was NEVER analyzed.
+
+--------------------------------------------------------------------------------
+AFTER (read_xdc eth_ss_ooc.xdc) — 4 clocks defined, REAL paths analyzed
+--------------------------------------------------------------------------------
+Clock Summary:
+  Clock             Waveform(ns)     Period(ns)  Freq(MHz)  Kind
+  dut_clk           {0.000 10.000}   20.000      50.000     primary  (partition pin)
+  phy_rmii_ref_clk  {0.000 10.000}   20.000      50.000     primary  (partition pin)
+  mii_rx_clk        {0.000 20.000}   40.000      25.000     GENERATED (/2 of ref)
+  mii_tx_clk        {0.000 20.000}   40.000      25.000     GENERATED (/2 of ref)
+
+Periods for the two partition-pin clocks match the built static shell
+byte-for-byte (partition-timing.md table: clk_wiz_dut/clk_out1 and
+clk_wiz_shell/clk_out2, both 20.000 ns / {0.000 10.000}).
+
+Intra-clock timing (setup WNS / hold WHS / total endpoints):
+  Clock             WNS(ns)   fail/total(setup)   WHS(ns)   WPWS(ns)
+  dut_clk           +17.333   0/3953              +0.093    +9.048
+  phy_rmii_ref_clk  +18.875   0/29                +0.093    +9.725
+  mii_rx_clk        +37.494   0/475               +0.083    +19.725
+  mii_tx_clk        +37.292   0/253               +0.083    +19.725
+
+Overall Design Timing Summary:
+  Setup: WNS +17.333 ns | TNS 0.000 | 0 failing / 4765 endpoints  => ALL setup met
+  Hold : WHS -0.178 ns  | THS -3.612 | 41 failing / 4765 endpoints (see note)
+  Pulse: WPWS +9.048 ns | 0 failing
+
+Clock interaction (async group verification — the WB<->MII crossing):
+  dut_clk    -> mii_rx_clk : Ignored / Asynchronous Groups   (244 endpoints)
+  dut_clk    -> mii_tx_clk : Ignored / Asynchronous Groups   (166 endpoints)
+  mii_rx_clk -> dut_clk    : Ignored / Asynchronous Groups   (546 endpoints)
+  mii_tx_clk -> dut_clk    : Ignored / Asynchronous Groups   ( 17 endpoints)
+  phy_rmii_ref_clk <-> mii_tx/rx : Clean / Timed  (synchronous /2 relationship)
+  => set_clock_groups async_dutclk_rmii took effect: the MAC's async-FIFO'd
+     Wishbone(dut_clk)<->MII(ref-derived) boundary is correctly NOT timed,
+     while the phase-related ref<->MII/2 paths ARE timed.
+
+--------------------------------------------------------------------------------
+BEFORE -> AFTER
+--------------------------------------------------------------------------------
+  clocks constrained : 0  ->  4  (2 primary partition-pin + 2 generated MII)
+  analyzed endpoints : 0  ->  4765 real setup paths, WNS +17.333 ns, 0 failing
+  async crossing     : (invisible) -> declared + verified (WB<->MII)
+  Standalone OOC timing went from meaningless ("no clocks") to a real,
+  clean-setup sign-off across all of this RM's clock domains.
+
+--------------------------------------------------------------------------------
+NOTES / what the RM's internal timing surfaced
+--------------------------------------------------------------------------------
+1. HOLD (41 endpoints, WHS -0.178 ns) is on the phy_rmii_ref_clk <-> mii_tx/rx
+   /2 crossing — the rmii_to_mii toggle-register-as-clock (mtx_clk/mrx_clk are
+   plain FFs used as clocks, 0 BUFG). At OOC POST-SYNTH there is no placement or
+   routing, so hold slack is not yet meaningful and is resolved by place/route;
+   it is NOT an OOC sign-off blocker. It IS a real, previously-invisible design
+   characteristic (a divided clock generated in fabric) that this contract now
+   makes visible for the first time — worth watching at the full DFX
+   implementation (where eth_ss_rm.xdc reapplies the same generated clocks +
+   async group scoped to the RP cell).
+2. dut_clk<->rtc_clk (PTP) and dut_clk<->DMA-SRAM are SINGLE-DOMAIN in this
+   wrapper (rtc_clk = dut_clk, SRAM HCLK = dut_clk), so they needed NO async
+   exception and time cleanly inside the dut_clk group (3953 endpoints). The
+   partition-timing.md task listed them as candidate CDCs; they collapse to one
+   domain in rp_eth_ss_wrapper's clock choices.
+
+Reproduce: vivado -mode batch -source fpga/rp/eth_ss/ooc_synth.tcl
+(the ooc_synth.tcl now reads eth_ss_ooc.xdc when present and emits
+build/timing_rm_eth_ss.rpt).

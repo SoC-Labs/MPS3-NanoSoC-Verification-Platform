@@ -1,0 +1,5 @@
+# OOC synth outputs (ooc_synth.tcl) + Vivado side files
+build/
+*.jou
+*.log
+.Xil/

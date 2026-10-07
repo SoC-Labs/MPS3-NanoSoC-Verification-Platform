@@ -1,0 +1,114 @@
+# signals_selftest.yaml — THE CI MANIFEST.
+#
+# Tiny, fast, board-free. Targets the Stream-B selftest DUT (a synthetic
+# AHB-Lite-shaped stub, NOT nanosoc), so `make -C tests/identify_iice check`
+# runs in seconds with no Identify, no bitstream and no nanosoc source tree.
+#
+# Contract: INTERFACES.md §2 (frozen schema). Generated artifacts: §3.1/§3.2/§3.3.
+#
+# TB/DUT interface agreed by convention across streams A and B:
+#     TB top          `tb`
+#     DUT instance    `tb.u_dut`
+#     signals         clk, haddr[32], htrans[2], hwrite, hrdata[32], hready,
+#                     state[3], lockup
+# If Stream B renames any of these, THIS FILE is the single place to fix it —
+# that is the entire point of the manifest.
+#
+# The `hw:` paths here are the sim paths with '.' -> '/'. The selftest DUT is
+# never synthesised and never instrumented by Identify, so these exist only to
+# exercise the §3.3 rename table and to give Stream C's synth_hw_fsdb.py a
+# mechanical (dot -> slash) mapping to apply. Do not read them as real
+# Identify paths — see signals_nanosoc.yaml for those.
+
+iice:
+  name: IICE_SELFTEST
+  # 64, not 1024: the CI gate must stay in the seconds range. The cropper's
+  # window arithmetic is depth-agnostic, so a small depth exercises exactly the
+  # same code path as the real 1024.
+  depth: 64
+  # middle => 32 samples pre-trigger, 32 post. Consumed by the offline cropper
+  # (Stream C) and the Identify debugger script (Stream D) — NOT by the .idc:
+  # `iice sampler -triggertime` is a DEBUGGER-only option
+  # (identify_debug_env_reference.pdf p.52/p.54), so gen_idc.py must not emit it.
+  trigger_time: middle
+  controller: statemachine
+  trigger_conditions: 2
+  trigger_states: 2
+  clock:
+    hw:   /tb/u_dut/clk
+    sim:  tb.u_dut.clk
+    edge: positive
+
+signals:
+  # --- AHB-Lite address phase (the trigger set) ----------------------------
+  - name:    haddr
+    width:   32
+    hw:      /tb/u_dut/haddr
+    sim:     tb.u_dut.haddr
+    sample:  true
+    trigger: true
+    radix:   hex
+
+  - name:    htrans
+    width:   2
+    hw:      /tb/u_dut/htrans
+    sim:     tb.u_dut.htrans
+    sample:  true
+    trigger: true
+    radix:   bin
+
+  # --- sample-only: in the buffer, out of the trigger logic ----------------
+  # Each extra trigger condition DOUBLES the trigger RAM (INTERFACES.md §2), so
+  # everything that is only needed for post-mortem reading stays sample-only.
+  - name:    hwrite
+    width:   1
+    hw:      /tb/u_dut/hwrite
+    sim:     tb.u_dut.hwrite
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  - name:    hrdata
+    width:   32
+    hw:      /tb/u_dut/hrdata
+    sim:     tb.u_dut.hrdata
+    sample:  true
+    trigger: false
+    radix:   hex
+
+  - name:    hready
+    width:   1
+    hw:      /tb/u_dut/hready
+    sim:     tb.u_dut.hready
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  - name:    state
+    width:   3
+    hw:      /tb/u_dut/state
+    sim:     tb.u_dut.state
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  - name:    lockup
+    width:   1
+    hw:      /tb/u_dut/lockup
+    sim:     tb.u_dut.lockup
+    sample:  true
+    trigger: false
+    radix:   bin
+
+trigger:
+  # Fires MID-RUN, not at reset: with depth 64 / trigger_time middle we need ~32
+  # samples of history before the trigger and ~32 after, so a trigger at
+  # address 0 (i.e. at reset) would crop to a half-empty window and the compare
+  # would be trivially green over X-masked samples. 0x40 is far enough into the
+  # DUT's address walk to have real history on both sides.
+  #
+  # NOTE the sized literals: `2'b10` and `32'h0000_0040`. A naive identifier
+  # scan over this string yields `b10` and `h0000_0040` as "unknown signals" —
+  # manifest.py strips every literal form BEFORE extracting identifiers. This
+  # expression is the regression case for that (tests/test_generators.py).
+  expr: "htrans == 2'b10 && haddr == 32'h0000_0040"

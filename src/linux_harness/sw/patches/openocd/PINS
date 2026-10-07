@@ -1,0 +1,11 @@
+# patches/openocd/PINS -- what the image's OpenOCD is, exactly (read by
+# br2_external/tests/run.sh's pin check and by the mps3-debug package, which
+# writes the VERSION line on the image). One key=value per line.
+openocd_version=0.12.0
+openocd_tarball_sha256=af254788be98861f2bd9103fe6e60a774ec96a8c374744eef9197f6043075afa
+recipe=github.com/SoC-Labs/soclabs-openocd@39eba5814063ef385a6687e3d11d465394ca570d
+ahb_qspi_src=git.soton.ac.uk/soclabs/ahb_qspi@c97deb22ed1b850f3f7e421c15c571a6ff1a2e0c:sw/openocd/ahb_qspi.c
+ahb_qspi_sha256=c741f7660e27162022f7a10254044903a5d1f8069ddccb6ba8e65468fb69e081
+hostio4_src=github.com/SoC-Labs/NanoSoC-Ethernet-Chiplet@057d317c1463ebcd976fce5fca4388d798d86b79:scripts/rig/eth_chiplet/openocd_hostio4/hostio4.c
+hostio4_sha256=d7b402b53bd9a013ef9dc04f025639d21a8bce3fe9eba1c9fa3a3c0572e7f54c
+version_line=0.12.0+mps3 (soclabs-openocd 39eba58, ahb_qspi c97deb22, hostio4 057d317c; remote_bitbang)

@@ -1,0 +1,64 @@
+#!/bin/sh
+#
+# mps3-keys-sync — rebuild the ONE authorized_keys file dropbear reads.
+#
+# dropbear reads exactly one file per user (~/.ssh/authorized_keys), and
+# re-reads it on every login. Root has two key sources (IMAGE_CONTRACT §4.2):
+#   baked    /usr/share/mps3/ssh/authorized_keys.baked   image-owned, from
+#            MPS3_AUTHORIZED_KEYS at build; never counts as a claim
+#   claimed  /persist/ssh/authorized_keys                the TOFU claim that
+#            harnessd writes on a TFTP WRQ named "authorized_keys"; claimed
+#            <=> this file exists and is non-empty
+# This script writes baked + the claim's VALID key lines to
+# /root/.ssh/authorized_keys (tmp + rename, dir 0700, file 0600). Run it:
+#   - every boot (S12mps3persist),
+#   - by harnessd after it writes or removes the claim file,
+#   - by mps3-unclaim.
+# The image's own /root/.ssh/authorized_keys already holds the baked keys, so
+# if this never runs the baked keys still work (fail-safe, never fail-open).
+#
+# A claim line is kept only if it has a known key type followed by a base64
+# blob (options before the type are allowed); anything else is dropped and
+# counted. At most 64 lines / 16 KiB of claim are read.
+#
+# Paths are overridable for the host tests (br2_external/tests/run.sh).
+
+BAKED=${MPS3_KEYS_BAKED:-/usr/share/mps3/ssh/authorized_keys.baked}
+CLAIM=${MPS3_KEYS_CLAIM:-/persist/ssh/authorized_keys}
+OUT=${MPS3_KEYS_OUT:-/root/.ssh/authorized_keys}
+
+dir=$(dirname "$OUT")
+mkdir -p "$dir" && chmod 0700 "$dir" || exit 1
+tmp="$OUT.tmp.$$"
+umask 077
+
+{
+    echo "# managed by /usr/sbin/mps3-keys-sync — edits are overwritten."
+    echo "# baked: $BAKED  claimed: $CLAIM"
+    if [ -s "$BAKED" ]; then
+        grep -v '^[[:space:]]*\(#\|$\)' "$BAKED"
+    fi
+    if [ -s "$CLAIM" ]; then
+        echo "# --- claimed ---"
+        dd if="$CLAIM" bs=16384 count=1 2>/dev/null | head -n 64 | awk '
+            /^[[:space:]]*(#|$)/ { next }
+            {
+                ok = 0
+                for (i = 1; i < NF; i++) {
+                    if ($i ~ /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)$/ \
+                        && $(i + 1) ~ /^[A-Za-z0-9+\/]+=*$/ && length($(i + 1)) >= 16) {
+                        ok = 1; break
+                    }
+                }
+                if (ok) print; else dropped++
+            }
+            END { if (dropped) print "# dropped " dropped " invalid claim line(s)" }'
+    fi
+} > "$tmp" || { rm -f "$tmp"; exit 1; }
+
+nb=$(grep -c -v '^[[:space:]]*\(#\|$\)' "$BAKED" 2>/dev/null)
+nc=$(sed -n '/^# --- claimed ---$/,$p' "$tmp" | grep -c -v '^#')
+nd=$(sed -n 's/^# dropped \([0-9]*\) invalid.*/\1/p' "$tmp")
+chmod 0600 "$tmp" && mv -f "$tmp" "$OUT" || { rm -f "$tmp"; exit 1; }
+echo "mps3-keys-sync: baked=${nb:-0} claimed=$nc dropped=${nd:-0} -> $OUT"
+exit 0

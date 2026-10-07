@@ -1,0 +1,4 @@
+# Intermediates only. socscope_exp.hex is committed BESIDE the source (a repo-wide
+# rule ignores build/ directories, and hello_image.hex sets the precedent of a
+# checked-in image next to the RM that bakes it).
+build/

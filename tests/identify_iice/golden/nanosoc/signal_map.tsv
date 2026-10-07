@@ -1,0 +1,16 @@
+name	width	radix	hw_path	sim_path
+haddr	32	hex	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HADDR	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HADDR
+htrans	2	bin	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HTRANS	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HTRANS
+hprot	4	bin	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HPROT	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HPROT
+hready	1	bin	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HREADY	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HREADY
+hwrite	1	bin	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HWRITE	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HWRITE
+hresp	1	bin	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HRESP	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HRESP
+hrdata	32	hex	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HRDATA	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HRDATA
+hwdata	32	hex	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HWDATA	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HWDATA
+lockup	1	bin	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/CORE_LOCKUP	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.CORE_LOCKUP
+sleeping	1	bin	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/CORE_SLEEPING	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.CORE_SLEEPING
+sysresetreq	1	bin	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/CORE_SYSRESETREQ	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.CORE_SYSRESETREQ
+hresetn	1	bin	/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/SYS_HRESETn	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.SYS_HRESETn
+remap_ctrl	4	bin	/u_rm/u_nanosoc/u_ss_cpu/sys_remap_ctrl	micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.sys_remap_ctrl
+trigger_marker	1	bin	__DERIVED__	__DERIVED__
+sample_clk	1	bin	/dut_clk	micropython_flash_boot_tb.dut_clk

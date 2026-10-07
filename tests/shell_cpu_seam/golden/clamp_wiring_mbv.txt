@@ -1,0 +1,13 @@
+cpu mbv
+/dfx_ctl_0/ext_por_n_i <- /clk_wiz_shell/resetn /ddr_sys_rst_inv/Op1 /dut_clkrst_0/ext_por_n_i /proc_sys_reset_cpu/ext_reset_in /proc_sys_reset_ddr/ext_reset_in /proc_sys_reset_rmii/ext_reset_in /proc_sys_reset_shell/ext_reset_in /sys_rst_n
+/dut_clkrst_0/ext_por_n_i <- /clk_wiz_shell/resetn /ddr_sys_rst_inv/Op1 /dfx_ctl_0/ext_por_n_i /proc_sys_reset_cpu/ext_reset_in /proc_sys_reset_ddr/ext_reset_in /proc_sys_reset_rmii/ext_reset_in /proc_sys_reset_shell/ext_reset_in /sys_rst_n
+/dfx_ctl_0/wdt_reset_i <- /axi_timebase_wdt_0/wdt_reset /proc_sys_reset_cpu/aux_reset_in /proc_sys_reset_ddr/aux_reset_in /proc_sys_reset_shell/aux_reset_in
+/proc_sys_reset_shell/aux_reset_in <- /axi_timebase_wdt_0/wdt_reset /dfx_ctl_0/wdt_reset_i /proc_sys_reset_cpu/aux_reset_in /proc_sys_reset_ddr/aux_reset_in
+/dfx_decoupler_0/decouple <- /dfx_ctl_0/decouple_en_o
+/dfx_ctl_0/decoupled_i <- /clcd_kvm_0/decouple_status /dfx_decoupler_0/decouple_status
+/microblaze_riscv_0/Reset <- /dlmb_bram_if_cntlr/LMB_Rst /dlmb_v10/SYS_Rst /ilmb_bram_if_cntlr/LMB_Rst /ilmb_v10/SYS_Rst /proc_sys_reset_cpu/mb_reset
+/proc_sys_reset_cpu/aux_reset_in <- /axi_timebase_wdt_0/wdt_reset /dfx_ctl_0/wdt_reset_i /proc_sys_reset_ddr/aux_reset_in /proc_sys_reset_shell/aux_reset_in
+/proc_sys_reset_ddr/aux_reset_in <- /axi_timebase_wdt_0/wdt_reset /dfx_ctl_0/wdt_reset_i /proc_sys_reset_cpu/aux_reset_in /proc_sys_reset_shell/aux_reset_in
+/smartconnect_ddr/aresetn <- /proc_sys_reset_cpu/interconnect_aresetn
+/ddr4_0/c0_ddr4_aresetn <- /proc_sys_reset_ddr/peripheral_aresetn
+/telem_0/alarm_i <- /ddr4_0/c0_init_calib_complete

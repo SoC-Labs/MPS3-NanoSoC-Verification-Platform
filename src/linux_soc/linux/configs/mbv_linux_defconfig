@@ -1,0 +1,141 @@
+# ============================================================================
+# Buildroot defconfig: rv32 Linux for the MicroBlaze V "linux_soc" (MPS3/KU115)
+#
+# Proven on qemu-system-riscv32 -M virt; the same kernel Image + rootfs are the
+# board artifacts (the board differs only in DTB + console, see ../README.md).
+#
+# TOOLCHAIN: the AMD/Xilinx PREBUILT glibc toolchain is used as an EXTERNAL
+# toolchain. Nothing is built from source. Facts measured off the toolchain
+# (NOT assumed) -- see ../README.md "Toolchain forensics":
+#   gcc 13.4.0, glibc 2.39, kernel headers 6.6
+#   sysroot ISA : rv32imac_zicbom_zba_zbb_zbs, ABI ilp32 (SOFT-FLOAT)
+#   loader      : ld-linux-riscv32-ilp32.so.1
+#
+# CRITICAL: the vendor gcc DEFAULTS to -march=rv32imafdc -mabi=ilp32d (HARD
+# float). That default cannot even compile hello-world against its own sysroot,
+# and would be fatally wrong for this core anyway (C_USE_FPU=0 -- no FPU).
+# The ISA/ABI below forces -march=rv32imac_zicsr_zifencei -mabi=ilp32, which is
+# what the shipped glibc actually is. Do not "simplify" this.
+# ============================================================================
+
+BR2_riscv=y
+BR2_RISCV_32=y
+
+# MUST be "custom", not the default. The "Target Architecture Variant" choice defaults
+# to BR2_riscv_g (= General purpose, IMAFD), which *selects* BR2_RISCV_ISA_RVF/RVD --
+# and a Kconfig `select` cannot be undone by "# ... is not set". Without this line the
+# ISA silently comes out rv32imafdc no matter what you write below.
+BR2_riscv_custom=y
+
+# ISA: I M A C + Zicsr/Zifencei (Buildroot appends the latter on gcc>=12).
+# Deliberately NO F, NO D: the core has no FPU, and the vendor glibc is soft-float.
+# Zba/Zbb/Zbs are present in HW but NOT requested: rv32imac is a strict subset,
+# so one binary runs on both the real core and qemu-virt. Perf is irrelevant here.
+BR2_RISCV_ISA_RVM=y
+BR2_RISCV_ISA_RVA=y
+BR2_RISCV_ISA_RVC=y
+BR2_RISCV_ABI_ILP32=y
+BR2_RISCV_USE_MMU=y
+# !!! These two DEFAULT TO y in Buildroot's Kconfig and MUST be turned off here.
+# Leaving them on yields -march=rv32ima(fd)c: gcc then emits real F/D instructions
+# (ilp32 only makes the *calling convention* soft-float), which illegal-instruction-
+# trap on this FPU-less core (C_USE_FPU=0) -- while still booting fine under
+# qemu-virt, which HAS an FPU. That is a silent board-only failure: the QEMU proof
+# would pass and the board would die. Verified: with these unset, TOOLCHAIN_EXTERNAL_CFLAGS
+# is "-march=rv32imac_zicsr_zifencei -mabi=ilp32"; with them set it was "...imafdc...".
+# BR2_RISCV_ISA_RVF is not set
+# BR2_RISCV_ISA_RVD is not set
+
+# --- External (vendor, pre-built) toolchain -------------------------------
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
+BR2_TOOLCHAIN_EXTERNAL_PREINSTALLED=y
+# NOT the raw vendor dir: a thin local wrapper around it (see linux/toolchain_wrapper/,
+# built by linux/mk_toolchain_wrapper.sh). It calls the vendor's REAL compiler binaries
+# with --sysroot + a CORRECT default -march/-mabi. Needed because Buildroot probes the
+# compiler with no ABI flags (pkg-toolchain-external.mk:607, check_toolchain_ssp), and
+# the vendor gcc's built-in default (rv32imafdc/ilp32d) cannot even compile hello-world
+# against its own soft-float glibc. The vendor toolchain is never modified; its
+# location is MBV_LINUX_TOOLCHAIN (env or tools.env), read by mk_toolchain_wrapper.sh.
+# Every path below is relative to this checkout via the br2_external tree
+# (name: MBV, so $(BR2_EXTERNAL_MBV_PATH) = <repo>/src/linux_soc/linux/br2_external).
+BR2_TOOLCHAIN_EXTERNAL_PATH="$(BR2_EXTERNAL_MBV_PATH)/../toolchain_wrapper"
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX="riscv32-amd-linux-gnu"
+BR2_TOOLCHAIN_EXTERNAL_GCC_13=y
+BR2_TOOLCHAIN_EXTERNAL_HEADERS_6_6=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM_GLIBC=y
+BR2_TOOLCHAIN_EXTERNAL_HAS_SSP=y
+BR2_TOOLCHAIN_EXTERNAL_CXX=y
+# glibc 2.39 removed the sunrpc implementation (it lives in libtirpc now), so the
+# vendor libc genuinely has no RPC. Buildroot defaults this to y for glibc and then
+# hard-fails its own probe ("RPC support not available in C library"). Must be off.
+# BR2_TOOLCHAIN_EXTERNAL_INET_RPC is not set
+
+# --- Workaround patches (broken silicon S-mode interrupt generation) -------
+# Applied by Buildroot to <pkg> from patches/<pkg>/*.patch:
+#   patches/opensbi/  plan-C M-mode timer: OpenSBI drives the AXI timer via
+#                     AXI INTC + MEIP and injects mip.STIP (opt-in via the DT
+#                     property "soclabs,sbi-timer"; inert otherwise).
+#   patches/linux/    uartlite IRQ-less RX/TX poll mode (opt-in via the DT
+#                     property "xlnx,rx-poll-ms"; inert otherwise).
+# Both patches are DT-gated, so the SAME fw_jump.bin/Image also serve the
+# original sstc/IRQ flow and the qemu -M virt regression unchanged.
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_MBV_PATH)/../patches"
+
+# --- Kernel ---------------------------------------------------------------
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.18.7"
+BR2_LINUX_KERNEL_USE_DEFCONFIG=y
+BR2_LINUX_KERNEL_DEFCONFIG="rv32"
+# Fragment adds the Xilinx AXI IP drivers (uartlite/intc/timer) so this ONE
+# Image also drives the real SoC, plus the virt drivers for the QEMU proof.
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_MBV_PATH)/../configs/kernel_fragment.config"
+BR2_LINUX_KERNEL_IMAGE=y
+# NB: deliberately NOT BR2_LINUX_KERNEL_DTS_SUPPORT. qemu-virt builds its own DTB
+# at run time, and the board DTB (mbv_soc.dts) is out-of-tree -- we compile it with
+# host-dtc. Enabling DTS_SUPPORT here just forces an in-tree DTS name we don't have.
+
+# --- System ---------------------------------------------------------------
+BR2_TARGET_GENERIC_HOSTNAME="mbv-linux"
+BR2_TARGET_GENERIC_ISSUE="MicroBlaze-V rv32 Linux (SoCLabs linux_soc)"
+# getty on "console" (NOT ttyS0) on purpose: /dev/console follows the kernel
+# console= arg, so the identical rootfs gives a login on qemu-virt's ttyS0 AND
+# on the board's uartlite ttyUL0.
+BR2_TARGET_GENERIC_GETTY_PORT="console"
+# NOTE: the vendor sysroot's /etc/ld.so.conf lands in TARGET_DIR and makes Buildroot
+# abort target-finalize. It is removed by a TARGET_FINALIZE_HOOK in br2_external/, NOT
+# by BR2_ROOTFS_POST_BUILD_SCRIPT -- post-build scripts run at Makefile:827, well after
+# the check at :788, so they cannot fix it. Build with BR2_EXTERNAL=../br2_external
+# (build.sh does this).
+
+# --- Rootfs ---------------------------------------------------------------
+# REQUIRED, and the reason is not cosmetic. The AMD sysroot is a merged-/usr layout:
+# it has NO /lib at all -- libc AND the dynamic loader live only in usr/lib. Buildroot's
+# copy_toolchain_lib_root preserves the path it found them at, so they land in
+# target/usr/lib. But every target binary's ELF INTERP is "/lib/ld-linux-riscv32-ilp32.so.1".
+# With a non-merged skeleton, /lib is a real, loader-less directory -> execve() of
+# /sbin/init returns ENOENT -> "Failed to execute /sbin/init (error -2)" -> kernel panic
+# "No working init found", even though /sbin/init is plainly there. (That is exactly how
+# this first failed.) Merging /usr makes /lib a symlink to /usr/lib, so the INTERP
+# resolves. Without this the kernel boots perfectly and userland never starts.
+BR2_ROOTFS_MERGED_USR=y
+
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_SIZE="120M"
+BR2_TARGET_ROOTFS_CPIO=y
+BR2_TARGET_ROOTFS_CPIO_GZIP=y
+
+# --- Firmware: OpenSBI (M-mode runtime; supplies SBI to S-mode Linux) -----
+BR2_TARGET_OPENSBI=y
+BR2_TARGET_OPENSBI_CUSTOM_VERSION=y
+BR2_TARGET_OPENSBI_CUSTOM_VERSION_VALUE="1.6"
+BR2_TARGET_OPENSBI_PLAT="generic"
+
+# --- Host tools: QEMU (this is what we boot the result on) ----------------
+BR2_PACKAGE_HOST_QEMU=y
+BR2_PACKAGE_HOST_QEMU_SYSTEM_MODE=y
+
+# device-tree compiler on the host, to build mbv_soc.dtb
+BR2_PACKAGE_HOST_DTC=y

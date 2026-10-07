@@ -1,0 +1,161 @@
+Subject: [PATCH] serial: uartlite: optional IRQ-less RX/TX poll mode (xlnx,rx-poll-ms)
+
+Workaround for silicon where the uartlite interrupt can never be
+delivered to the kernel (dead S-mode external interrupts on the
+SoCLabs linux_soc MicroBlaze-V). Guarded by the DT property
+xlnx,rx-poll-ms (or boot arg uartlite.rx_poll_ms=N); with the
+property absent the driver is byte-for-byte behaviourally unchanged.
+
+diff -Naur a/drivers/tty/serial/uartlite.c b/drivers/tty/serial/uartlite.c
+--- a/drivers/tty/serial/uartlite.c	2026-07-16 21:26:46.839522863 +0100
++++ b/drivers/tty/serial/uartlite.c	2026-07-16 21:27:29.786228194 +0100
+@@ -22,6 +22,7 @@
+ #include <linux/of.h>
+ #include <linux/clk.h>
+ #include <linux/pm_runtime.h>
++#include <linux/timer.h>
+ 
+ #define ULITE_NAME		"ttyUL"
+ #if CONFIG_SERIAL_UARTLITE_NR_UARTS > 4
+@@ -33,6 +34,19 @@
+ #endif
+ #define ULITE_NR_UARTS		CONFIG_SERIAL_UARTLITE_NR_UARTS
+ 
++/*
++ * Optional timer-driven RX/TX polling, for hardware where the uartlite
++ * interrupt can never be delivered (e.g. AMD MicroBlaze-V silicon with
++ * dead S-mode external interrupts). Enabled per-port by the DT property
++ * "xlnx,rx-poll-ms = <N>", or globally by the module/boot parameter
++ * uartlite.rx_poll_ms=N (which overrides the DT). In poll mode the port
++ * never requests its IRQ and never sets the uartlite interrupt-enable
++ * bit, so the interrupt line stays silent at the interrupt controller.
++ */
++static unsigned int rx_poll_ms;
++module_param(rx_poll_ms, uint, 0444);
++MODULE_PARM_DESC(rx_poll_ms, "Poll the RX/TX FIFOs every N ms instead of using the interrupt (0 = use interrupt)");
++
+ /* ---------------------------------------------------------------------
+  * Register definitions
+  *
+@@ -72,12 +86,18 @@
+  * @clk: Our parent clock, if present
+  * @baud: The baud rate configured when this device was synthesized
+  * @cflags: The cflags for parity and data bits
++ * @rx_poll_ms: poll period in ms; nonzero = poll mode, no interrupt used
++ * @poll_timer: timer driving the FIFO polling when @rx_poll_ms != 0
++ * @port: back-pointer for @poll_timer
+  */
+ struct uartlite_data {
+ 	const struct uartlite_reg_ops *reg_ops;
+ 	struct clk *clk;
+ 	unsigned int baud;
+ 	tcflag_t cflags;
++	unsigned int rx_poll_ms;
++	struct timer_list poll_timer;
++	struct uart_port *port;
+ };
+ 
+ struct uartlite_reg_ops {
+@@ -241,6 +261,31 @@
+ 	}
+ }
+ 
++static void ulite_poll_timer(struct timer_list *t)
++{
++	struct uartlite_data *pdata = timer_container_of(pdata, t, poll_timer);
++	struct uart_port *port = pdata->port;
++	unsigned long flags;
++	int stat, busy, n = 0;
++
++	/* same work the ISR would do, minus the IRQ_NONE bookkeeping */
++	do {
++		uart_port_lock_irqsave(port, &flags);
++		stat = uart_in32(ULITE_STATUS, port);
++		busy  = ulite_receive(port, stat);
++		busy |= ulite_transmit(port, stat);
++		uart_port_unlock_irqrestore(port, flags);
++		n++;
++	} while (busy);
++
++	if (n > 1)
++		tty_flip_buffer_push(&port->state->port);
++
++	mod_timer(&pdata->poll_timer,
++		  jiffies + max_t(unsigned long, 1,
++				  msecs_to_jiffies(pdata->rx_poll_ms)));
++}
++
+ static unsigned int ulite_tx_empty(struct uart_port *port)
+ {
+ 	unsigned long flags;
+@@ -296,6 +341,23 @@
+ 		return ret;
+ 	}
+ 
++	if (pdata->rx_poll_ms) {
++		/*
++		 * Poll mode: do not request the IRQ and, crucially, do
++		 * NOT set ULITE_CONTROL_IE - the interrupt output must
++		 * stay silent so a broken (or M-mode-owned) interrupt
++		 * path is never exercised.
++		 */
++		uart_out32(ULITE_CONTROL_RST_RX | ULITE_CONTROL_RST_TX,
++			ULITE_CONTROL, port);
++		uart_out32(0, ULITE_CONTROL, port);
++		pdata->port = port;
++		timer_setup(&pdata->poll_timer, ulite_poll_timer, 0);
++		mod_timer(&pdata->poll_timer,
++			  jiffies + msecs_to_jiffies(pdata->rx_poll_ms));
++		return 0;
++	}
++
+ 	ret = request_irq(port->irq, ulite_isr, IRQF_SHARED | IRQF_TRIGGER_RISING,
+ 			  "uartlite", port);
+ 	if (ret)
+@@ -314,7 +376,10 @@
+ 
+ 	uart_out32(0, ULITE_CONTROL, port);
+ 	uart_in32(ULITE_CONTROL, port); /* dummy */
+-	free_irq(port->irq, port);
++	if (pdata->rx_poll_ms)
++		timer_delete_sync(&pdata->poll_timer);
++	else
++		free_irq(port->irq, port);
+ 	clk_disable(pdata->clk);
+ }
+ 
+@@ -821,6 +886,11 @@
+ 			pdata->cflags |= PARENB;
+ 		}
+ 
++		prop = "xlnx,rx-poll-ms";
++		ret = of_property_read_u32(np, prop, &pdata->rx_poll_ms);
++		if (ret && ret != -EINVAL)
++			goto of_err;
++
+ 		val = 8;
+ 		prop = "xlnx,data-bits";
+ 		ret = of_property_read_u32(np, prop, &val);
+@@ -853,9 +923,19 @@
+ 	if (!res)
+ 		return -ENODEV;
+ 
+-	irq = platform_get_irq(pdev, 0);
+-	if (irq < 0)
+-		return irq;
++	if (rx_poll_ms)
++		pdata->rx_poll_ms = rx_poll_ms;
++
++	if (pdata->rx_poll_ms) {
++		dev_info(&pdev->dev,
++			 "IRQ-less RX/TX poll mode, period %u ms\n",
++			 pdata->rx_poll_ms);
++		irq = 0;
++	} else {
++		irq = platform_get_irq(pdev, 0);
++		if (irq < 0)
++			return irq;
++	}
+ 
+ 	pdata->clk = devm_clk_get(&pdev->dev, "s_axi_aclk");
+ 	if (IS_ERR(pdata->clk)) {

@@ -1,0 +1,2 @@
+name: MPS3_HARNESS
+desc: MPS3 Linux harness userland (daemons, UIO estate, sshd) for shell_linux

@@ -1,0 +1,120 @@
+From: SoC Labs soclabs-openocd recipe
+Subject: [PATCH] register the hostio4 adapter driver (OpenOCD v0.12.0)
+
+Vendored VERBATIM (below the first blank-line-separated header) from
+github.com/SoC-Labs/soclabs-openocd @ 39eba5814063
+patches/0002-register-hostio4-v0.12.0.patch. It edits configure.ac, so the
+package autoreconfs (Buildroot's OPENOCD_AUTORECONF = YES already). The
+driver source is 0104-add-hostio4-driver.patch. Provenance + pins: README.md.
+
+# Registration-only: configure.ac + src/jtag/drivers/Makefile.am + src/jtag/interfaces.c.
+# The driver .c is NOT here -- it comes in via 'overlay' from the repo that owns
+# it, same as every other driver. Split out of the HOSTIO session's combined
+# patch, which embedded a modified copy of hostio4.c and so carried a second
+# source of truth for it.
+hostio4: nanoSoC HOSTIO4/ADP monitor driver, back-ported to OpenOCD v0.12.0
+
+This is the v0.12.0 (tag 9ea7f3d) variant of hostio4-openocd.patch.  Do NOT
+apply both: hostio4-openocd.patch targets master (43441cd) and this one
+targets the tag the bench runs.  Apply with `git apply` from the top of a
+clean v0.12.0 checkout.
+
+BUILT AND PROVEN: configured and compiled at 9ea7f3d, and all six transport
+proofs were re-run against the RTL-cited reference monitor
+(HAPS-work/fpga/haps-sx/hostio/adpmon.py) through adp-bridge.  No hardware
+was involved.
+
+THREE structural differences from the master patch, not one:
+
+  1. struct adapter_driver at 0.12.0 carries `const char * const *transports`
+     (src/jtag/interface.h:212), not master's .transport_ids /
+     .transport_preferred_id.  Modelled on rshim.c:513 at this tag.
+  2. The adapter-driver extern declarations live in src/jtag/interfaces.c at
+     0.12.0; src/jtag/interface.h has no such block, so the master patch's
+     interface.h hunk has no counterpart here.
+  3. configure.ac at 0.12.0 has no DMEM_ADAPTER m4 group and no
+     PROCESS_ADAPTERS([...], [true], [unused]) idiom for always-buildable
+     adapters.  The integration follows remote_bitbang's per-driver
+     AC_ARG_ENABLE / AS_IF / AM_CONDITIONAL pattern instead.
+
+struct dap_ops at 0.12.0 lacks master's .pre_connect_init and spells the
+register argument `unsigned` rather than `unsigned int`; the driver sets
+neither, and uses designated initialisers, so it needs no change.
+
+The doc/openocd.texi hunk is dropped here: it applies to master with an
+offset and carries no build dependency.
+
+diff --git a/configure.ac b/configure.ac
+index eee42d4..3cc0280 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -381,6 +381,10 @@ AC_ARG_ENABLE([remote-bitbang],
+   AS_HELP_STRING([--enable-remote-bitbang], [Enable building support for the Remote Bitbang jtag driver]),
+   [build_remote_bitbang=$enableval], [build_remote_bitbang=no])
+ 
++AC_ARG_ENABLE([hostio4],
++  AS_HELP_STRING([--disable-hostio4], [Disable building support for the nanoSoC HOSTIO4/ADP monitor driver]),
++  [build_hostio4=$enableval], [build_hostio4=yes])
++
+ AS_CASE(["${host_cpu}"],
+   [i?86|x86*], [],
+   [
+@@ -593,6 +597,12 @@ AS_IF([test "x$build_remote_bitbang" = "xyes"], [
+   AC_DEFINE([BUILD_REMOTE_BITBANG], [0], [0 if you don't want the Remote Bitbang JTAG driver.])
+ ])
+ 
++AS_IF([test "x$build_hostio4" = "xyes"], [
++  AC_DEFINE([BUILD_HOSTIO4], [1], [1 if you want the nanoSoC HOSTIO4/ADP driver.])
++], [
++  AC_DEFINE([BUILD_HOSTIO4], [0], [0 if you don't want the nanoSoC HOSTIO4/ADP driver.])
++])
++
+ AS_IF([test "x$build_sysfsgpio" = "xyes"], [
+   build_bitbang=yes
+   AC_DEFINE([BUILD_SYSFSGPIO], [1], [1 if you want the SysfsGPIO driver.])
+@@ -745,6 +755,7 @@ AM_CONDITIONAL([USB_BLASTER_DRIVER], [test "x$enable_usb_blaster" != "xno" -o "x
+ AM_CONDITIONAL([AMTJTAGACCEL], [test "x$build_amtjtagaccel" = "xyes"])
+ AM_CONDITIONAL([GW16012], [test "x$build_gw16012" = "xyes"])
+ AM_CONDITIONAL([REMOTE_BITBANG], [test "x$build_remote_bitbang" = "xyes"])
++AM_CONDITIONAL([HOSTIO4], [test "x$build_hostio4" = "xyes"])
+ AM_CONDITIONAL([BUSPIRATE], [test "x$enable_buspirate" != "xno"])
+ AM_CONDITIONAL([SYSFSGPIO], [test "x$build_sysfsgpio" = "xyes"])
+ AM_CONDITIONAL([XLNX_PCIE_XVC], [test "x$build_xlnx_pcie_xvc" = "xyes"])
+diff --git a/src/jtag/drivers/Makefile.am b/src/jtag/drivers/Makefile.am
+index 6410f37..a5a2d47 100644
+--- a/src/jtag/drivers/Makefile.am
++++ b/src/jtag/drivers/Makefile.am
+@@ -141,6 +141,9 @@ endif
+ if REMOTE_BITBANG
+ DRIVERFILES += %D%/remote_bitbang.c
+ endif
++if HOSTIO4
++DRIVERFILES += %D%/hostio4.c
++endif
+ if HLADAPTER_STLINK
+ DRIVERFILES += %D%/stlink_usb.c
+ endif
+diff --git a/src/jtag/interfaces.c b/src/jtag/interfaces.c
+index 67bbb3b..e117b8b 100644
+--- a/src/jtag/interfaces.c
++++ b/src/jtag/interfaces.c
+@@ -100,6 +100,9 @@ extern struct adapter_driver buspirate_adapter_driver;
+ #if BUILD_REMOTE_BITBANG == 1
+ extern struct adapter_driver remote_bitbang_adapter_driver;
+ #endif
++#if BUILD_HOSTIO4 == 1
++extern struct adapter_driver hostio4_adapter_driver;
++#endif
+ #if BUILD_HLADAPTER == 1
+ extern struct adapter_driver hl_adapter_driver;
+ #endif
+@@ -220,6 +223,9 @@ struct adapter_driver *adapter_drivers[] = {
+ #if BUILD_REMOTE_BITBANG == 1
+ 		&remote_bitbang_adapter_driver,
+ #endif
++#if BUILD_HOSTIO4 == 1
++		&hostio4_adapter_driver,
++#endif
+ #if BUILD_HLADAPTER == 1
+ 		&hl_adapter_driver,
+ #endif

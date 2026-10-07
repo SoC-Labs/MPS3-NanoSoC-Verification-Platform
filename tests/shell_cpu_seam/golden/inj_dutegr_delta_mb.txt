@@ -1,0 +1,51 @@
+# The SECOND deliberate change to the SHELL_CPU=mb block design since the fielded
+# baseline (eafe787): INJ -- the DUTEGR inject side (host -> DUT). dut_egress_0
+# gains the scalar inj_m_* source port (fpga/shell/ip/dut_egress, lane INJ,
+# docs/planning/HANDOVER_DUT_INJECT.md + A1/A2) and shell_bd.tcl SECTION 5 wires
+# it to the bridge's port-B ingress (INTEGRATION patch 01). Pinned the way
+# d13_usd_delta_mb.txt is, and checked TOGETHER with it: run_seam_gate.sh step 2
+# requires baseline -> this tree to be EXACTLY d13 + this file.
+#
+# Format: as d13_usd_delta_mb.txt (seam_dump.py `delta`; `-` = only before,
+# `+` = only after). Derived 2026-09-24 as (baseline -> this tree) minus the D13
+# golden; the D13 golden was contained in it line for line (0 missing).
+# Dumps: Vivado 2024.1, SHELL_CPU=mb SHELL_TOUCH=1 SHELL_REALPHY=0.
+#
+# What it says, in words (23 lines):
+#   + dut_egress_0: four new scalar pins inj_m_tdata[7:0] / inj_m_tvalid /
+#     inj_m_tlast (out) and inj_m_tready (in). No CONFIG value changes (no new
+#     generic), no new interface pin: the packager strips the auto-inferred
+#     `inj_m` AXIS interface, as it does `frm_i`.
+#   ~ eth_mac_test_subsystem_0 mgmt_s_{tdata,tvalid,tlast}: off the gnd_axis_*
+#     constants, onto the three new nets; mgmt_s_tready: from dangling onto the
+#     fourth.
+#   + four new nets, each with EXACTLY two members (one dut_egress_0 pin, one
+#     bridge pin): /dut_egress_0_inj_m_{tdata,tvalid,tlast},
+#     /eth_mac_test_subsystem_0_mgmt_s_tready.
+#   - the gnd_axis_tdata8/ctrl nets lose their three mgmt_s members; their
+#     uplink_s_* members (and vcc_axis_tready's uplink_m_tready) are unchanged:
+#     bridge port A stays SAFE-TIED.
+# No other cell, CONFIG value, net name, port or address moved.
++ CELL /dut_egress_0 > PIN inj_m_tdata dir=O type=undef left=7 right=0 net=/dut_egress_0_inj_m_tdata
++ CELL /dut_egress_0 > PIN inj_m_tlast dir=O type=undef left= right= net=/dut_egress_0_inj_m_tlast
++ CELL /dut_egress_0 > PIN inj_m_tready dir=I type=undef left= right= net=/eth_mac_test_subsystem_0_mgmt_s_tready
++ CELL /dut_egress_0 > PIN inj_m_tvalid dir=O type=undef left= right= net=/dut_egress_0_inj_m_tvalid
++ CELL /eth_mac_test_subsystem_0 > PIN mgmt_s_tdata dir=I type=undef left=7 right=0 net=/dut_egress_0_inj_m_tdata
++ CELL /eth_mac_test_subsystem_0 > PIN mgmt_s_tlast dir=I type=undef left= right= net=/dut_egress_0_inj_m_tlast
++ CELL /eth_mac_test_subsystem_0 > PIN mgmt_s_tready dir=O type=undef left= right= net=/eth_mac_test_subsystem_0_mgmt_s_tready
++ CELL /eth_mac_test_subsystem_0 > PIN mgmt_s_tvalid dir=I type=undef left= right= net=/dut_egress_0_inj_m_tvalid
++ NET /dut_egress_0_inj_m_tdata : /dut_egress_0/inj_m_tdata
++ NET /dut_egress_0_inj_m_tdata : /eth_mac_test_subsystem_0/mgmt_s_tdata
++ NET /dut_egress_0_inj_m_tlast : /dut_egress_0/inj_m_tlast
++ NET /dut_egress_0_inj_m_tlast : /eth_mac_test_subsystem_0/mgmt_s_tlast
++ NET /dut_egress_0_inj_m_tvalid : /dut_egress_0/inj_m_tvalid
++ NET /dut_egress_0_inj_m_tvalid : /eth_mac_test_subsystem_0/mgmt_s_tvalid
++ NET /eth_mac_test_subsystem_0_mgmt_s_tready : /dut_egress_0/inj_m_tready
++ NET /eth_mac_test_subsystem_0_mgmt_s_tready : /eth_mac_test_subsystem_0/mgmt_s_tready
+- CELL /eth_mac_test_subsystem_0 > PIN mgmt_s_tdata dir=I type=undef left=7 right=0 net=/gnd_axis_tdata8_dout
+- CELL /eth_mac_test_subsystem_0 > PIN mgmt_s_tlast dir=I type=undef left= right= net=/gnd_axis_ctrl_dout
+- CELL /eth_mac_test_subsystem_0 > PIN mgmt_s_tready dir=O type=undef left= right= net=-
+- CELL /eth_mac_test_subsystem_0 > PIN mgmt_s_tvalid dir=I type=undef left= right= net=/gnd_axis_ctrl_dout
+- NET /gnd_axis_ctrl_dout : /eth_mac_test_subsystem_0/mgmt_s_tlast
+- NET /gnd_axis_ctrl_dout : /eth_mac_test_subsystem_0/mgmt_s_tvalid
+- NET /gnd_axis_tdata8_dout : /eth_mac_test_subsystem_0/mgmt_s_tdata

@@ -1,0 +1,40 @@
+From: SoC Labs soclabs-openocd recipe
+Subject: [PATCH] register the ahb_qspi NOR flash driver (OpenOCD v0.12.0)
+
+Vendored VERBATIM from github.com/SoC-Labs/soclabs-openocd @ 39eba5814063
+patches/0001-register-ahb_qspi-v0.12.0.patch (the recipe's own pin is the
+v0.12.0 tag, 9ea7f3d = the Buildroot tarball's release). The driver source is
+0103-add-ahb_qspi-driver.patch. Provenance + pins: README.md here.
+
+diff --git a/src/flash/nor/Makefile.am b/src/flash/nor/Makefile.am
+index f04f0d2..c9e705f 100644
+--- a/src/flash/nor/Makefile.am
++++ b/src/flash/nor/Makefile.am
+@@ -11,6 +11,7 @@ noinst_LTLIBRARIES += %D%/libocdflashnor.la
+ NOR_DRIVERS = \
+ 	%D%/aduc702x.c \
+ 	%D%/aducm360.c \
++	%D%/ahb_qspi.c \
+ 	%D%/ambiqmicro.c \
+ 	%D%/at91sam4.c \
+ 	%D%/at91sam4l.c \
+diff --git a/src/flash/nor/drivers.c b/src/flash/nor/drivers.c
+index b9353d8..82fcd12 100644
+--- a/src/flash/nor/drivers.c
++++ b/src/flash/nor/drivers.c
+@@ -11,6 +11,7 @@
+ 
+ extern const struct flash_driver aduc702x_flash;
+ extern const struct flash_driver aducm360_flash;
++extern const struct flash_driver ahb_qspi_flash;
+ extern const struct flash_driver ambiqmicro_flash;
+ extern const struct flash_driver at91sam3_flash;
+ extern const struct flash_driver at91sam4_flash;
+@@ -87,6 +88,7 @@ extern const struct flash_driver rsl10_flash;
+ static const struct flash_driver * const flash_drivers[] = {
+ 	&aduc702x_flash,
+ 	&aducm360_flash,
++	&ahb_qspi_flash,
+ 	&ambiqmicro_flash,
+ 	&at91sam3_flash,
+ 	&at91sam4_flash,

@@ -1,0 +1,30 @@
+MPS3 nanoSoC Verification Platform
+Copyright 2026 SoC Labs
+
+This product includes software developed by SoC Labs and contributors as part
+of the nanoSoC / MPS3 FPGA verification platform work.
+
+Licensed under the Apache License, Version 2.0 (see the LICENSE file).
+
+-------------------------------------------------------------------------------
+Third-party and excluded IP
+-------------------------------------------------------------------------------
+
+This repository is built AGAINST, but does NOT contain and does NOT license,
+the following third-party IP. These are referenced by name and wired in through
+git-ignored local paths / environment variables only:
+
+  * Arm CoreSight SoC-400, Cortex-M0, Corstone/CMSDK and related Arm IP,
+    used under Arm Academic Access. This RTL is CONFIDENTIAL and is
+    deliberately excluded from this repository (see .gitignore and
+    fpga/rp/local_overrides/coresight_soc400/README.md). Nothing under the
+    Apache-2.0 license here grants any right to Arm's IP; obtain it under your
+    own Arm license.
+
+  * Vendor FPGA memory compilers and physical IP collateral (e.g. TSMC memory
+    compilers, XHB500) are likewise referenced from external, lab-managed
+    paths and are not included here.
+
+If you believe any file in this repository inadvertently includes third-party
+confidential IP, please contact the maintainers privately at <security contact: SoC Labs>
+(see SECURITY.md) so it can be removed.

@@ -1,0 +1,73 @@
+Subject: [PATCH] riscv: idle: CONFIG option to never execute wfi (SoCLabs MBV wfi-coma workaround)
+
+Config-gated variant of the linux_soc unconditional workaround patch
+(../../linux_soc/linux/patches/linux/0002-*): the wfi-coma behaviour is a
+property of bitstreams built with C_INTERRUPT_WAKEUP=0 (silicon-proven
+2026-07-16, repro src/linux_soc/fw_mspin). The shell_linux transplant BD
+pins + asserts C_INTERRUPT_WAKEUP=1, so the harness ships BOTH idle
+variants until that bitstream is silicon-proven:
+
+  Image        (RISCV_SOCLABS_NOWFI_IDLE=n)  stock wfi idle
+  Image_nowfi  (RISCV_SOCLABS_NOWFI_IDLE=y)  busy-poll idle
+
+Default n: byte-for-byte the stock idle path unless the option is set.
+
+--- linux-6.18.7.orig/arch/riscv/Kconfig	2026-01-23 10:21:37.000000000 +0000
++++ linux-6.18.7/arch/riscv/Kconfig	2026-07-16 22:15:11.348698339 +0100
+@@ -1146,6 +1146,24 @@
+ 
+           If unsure, say N.
+ 
++config RISCV_SOCLABS_NOWFI_IDLE
++	bool "Never execute WFI in the idle loop (SoCLabs MBV wfi-coma workaround)"
++	default n
++	help
++	  Workaround for AMD MicroBlaze-V silicon built with
++	  C_INTERRUPT_WAKEUP=0, where a hart in WFI is a coma: no interrupt
++	  and no debug halt ever wakes it (SoCLabs linux_soc fw_mspin
++	  discriminator, 2026-07-16 -- the same interrupts deliver perfectly
++	  into a busy loop). With this option the kernel idle path returns
++	  immediately instead of sleeping; the generic idle loop then
++	  busy-polls with IRQs enabled between iterations, exactly like the
++	  generic "nohlt" mode.
++
++	  Say N on hardware whose MicroBlaze-V was built with
++	  C_INTERRUPT_WAKEUP=1 (the shell_linux transplant BD pins and
++	  asserts this) and on qemu-virt. Say Y only for bitstreams whose
++	  WFI wake-up is unproven or known broken.
++
+ endmenu # "Kernel features"
+ 
+ menu "Boot options"
+--- linux-6.18.7.orig/arch/riscv/include/asm/cpuidle.h	2026-01-23 10:21:37.000000000 +0000
++++ linux-6.18.7/arch/riscv/include/asm/cpuidle.h	2026-07-16 22:15:11.351698599 +0100
+@@ -12,6 +12,21 @@
+ 
+ static inline void cpu_do_idle(void)
+ {
++#ifdef CONFIG_RISCV_SOCLABS_NOWFI_IDLE
++	/*
++	 * SoCLabs MBV wfi-coma silicon workaround (see the Kconfig help):
++	 * never execute wfi in the idle path. Return immediately with the
++	 * IRQ state unchanged (still disabled, per the arch_cpu_idle()
++	 * contract); default_idle_call() then re-enables interrupts, any
++	 * pending IRQ is taken, and do_idle() re-checks need_resched() --
++	 * i.e. the CPU busy-polls exactly like the generic "nohlt" mode.
++	 *
++	 * Other wfi sites are deliberately left alone: they are only in
++	 * post-panic/halt parking loops and SMP secondary paths that a
++	 * single-hart system never executes at runtime.
++	 */
++	cpu_relax();
++#else
+ 	/*
+ 	 * Add mb() here to ensure that all
+ 	 * IO/MEM accesses are completed prior
+@@ -19,6 +34,7 @@
+ 	 */
+ 	mb();
+ 	wait_for_interrupt();
++#endif
+ }
+ 
+ #endif

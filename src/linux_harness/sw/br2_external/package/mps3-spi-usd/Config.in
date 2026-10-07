@@ -1,0 +1,14 @@
+config BR2_PACKAGE_MPS3_SPI_USD
+	bool "mps3-spi-usd"
+	depends on BR2_LINUX_KERNEL
+	help
+	  spi-usd.ko: the SPI controller driver for the MPS3 shell's usd_spi
+	  block (D13, the USER microSD at 0x44A4_0000). The stock mmc_spi
+	  slot sits on it (/dev/mmcblk0); its one-line GPIO chip is the
+	  slot's card detect. Loaded at boot by S11modules
+	  (/etc/modules-load.d/mps3-spi-usd.conf). Inert without a
+	  "soclabs,usd-spi-1.0" node; refuses (-ENODEV) a shell whose
+	  0x44A4 page does not read ID 0x55534431.
+
+comment "mps3-spi-usd needs a Linux kernel to be built"
+	depends on !BR2_LINUX_KERNEL

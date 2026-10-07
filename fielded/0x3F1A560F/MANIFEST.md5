@@ -1,0 +1,33 @@
+# MANIFEST.md5 -- the fielded static shell 0x3F1A560F (docs/FIELDED_SHELL.md).
+#
+# `md5sum -c MANIFEST.md5` from inside this directory. Generated 2026-09-22 from
+# the ONLY complete copy on this workstation:
+#   fpga/dfx/build_mint_2026_09/prod/          (gitignored: fpga/dfx/build*/)
+#   fpga/dfx/build_mint_2026_09/shell_proj/    (same tree -- this mint kept the
+#                                               shell project INSIDE the build
+#                                               dir, unlike 0xA8C1C535's
+#                                               build/shell_proj_mint/)
+#
+# static_routed_locked.dcp is the one that matters. Every future `make add-rm-*
+# BUILD=build_mint_2026_09` reads it (fpga/dfx/build_dfx.tcl, incremental mode).
+# Without it, no new overlay can ever be added to the shell that is on the board
+# -- the only remedy is a full re-mint, which strands all eleven overlays already
+# fielded.
+#
+# config_rm_greybox_fw.bit is listed here and was NOT listed for 0xA8C1C535. It
+# is the exact image the config SD carries: the greybox base with this mint's
+# firmware baked in by updatemem. Its firmware was built from a DIRTY tree
+# (cb31b0f2 + an uncommitted DUT_EGRESS flag -- docs/FIELDED_SHELL.md says so
+# plainly), so it is NOT reproducible from any commit. That is precisely why the
+# bytes are worth a checksum.
+#
+b06db74662e648c5e5515498634c0a9c  static_routed_locked.dcp
+995a9bc682b10080b25204d123aa0402  config_rm_greybox_routed.dcp
+39ad28c517844d9901b11e6e52247dbf  static_id.txt
+de6d498d72e44593c9a676728eea009e  overlay_inputs.txt
+6c6c9761d6168aa6f9cfcb1934aaa4c3  config_rm_greybox.mmi
+aa36ad9978cfb834aacfd67a88cf58f7  config_rm_greybox.bit
+bf39fabcfacd564f2b28f796a58de3e0  config_rm_greybox_fw.bit
+d13c73346bdd594866040e93c2c00f05  shell_static_synth.dcp
+424b487905844791c1b0838ce11f2a48  shell_harness.xsa
+16a3492be8c56f00b3789e60f3b5bc82  static_stamp.json

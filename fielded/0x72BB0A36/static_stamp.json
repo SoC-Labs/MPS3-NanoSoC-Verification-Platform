@@ -1,0 +1,12 @@
+{
+  "schema": "mps3-static-stamp",
+  "schema_version": "1",
+  "generated_by": "fpga/dfx/tools/static_stamp.tcl",
+  "bitstream": "config_rm_greybox.bit",
+  "static_id": "0x72BB0A36",
+  "stamped": true,
+  "harness_version": "1.0.0",
+  "usercode": "0xC8551081",
+  "usr_access": "0x01000001",
+  "note": "USERID discriminates IMPLEMENTATION runs (overlay binding); USR_ACCESS carries HARNESS_VER32 and discriminates firmware RELEASES (skew check). Read fpga/dfx/tools/static_stamp.tcl before trusting either."
+}

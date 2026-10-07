@@ -1,0 +1,20 @@
+# MANIFEST.md5 -- the fielded static shell 0xA8C1C535 (docs/FIELDED_SHELL.md).
+#
+# `md5sum -c MANIFEST.md5` from inside this directory. Generated 2026-09-09 from
+# the ONLY complete copy in existence at the time:
+#   fpga/dfx/build_mint/prod/        (gitignored: fpga/dfx/build*/)
+#   build/shell_proj_mint/           (gitignored: build/)
+#
+# static_routed_locked.dcp is the one that matters. Every future `make add-rm-*
+# BUILD=build_mint` reads it (fpga/dfx/build_dfx.tcl, incremental mode). Without
+# it, no new overlay can ever be added to the shell that is on the board -- the
+# only remedy is a full re-mint, which strands every overlay already fielded.
+#
+088fac2695d8407cee4607be9f305a28  static_routed_locked.dcp
+33327b59505a1f12f68bb7ca4246224c  config_rm_greybox_routed.dcp
+2c86f1548ee46157dae1abadaf0fcdff  static_id.txt
+54be381288f53bd19665218f8f3ae143  overlay_inputs.txt
+87ebf1f2a83f80082d750ab2cafeed0a  config_rm_greybox.mmi
+94853a897c56fa673cb1f70bbcaae2f0  config_rm_greybox.bit
+4e7434a3c45acb12abf8b648506cf2e6  shell_static_synth.dcp
+f53d515f79a33f444032095d84e711a7  shell_harness.xsa

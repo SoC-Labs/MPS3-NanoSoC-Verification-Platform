@@ -1,0 +1,1816 @@
+
+memtest.elf:     file format elf32-littleriscv
+
+
+Disassembly of section .text:
+
+00000000 <_start>:
+    .type   _start, @function
+_start:
+    /* ---- global pointer (gp). Must not be relaxed away, so norelax here. ---- */
+    .option push
+    .option norelax
+    la      gp, __global_pointer$
+       0:	00002197          	auipc	gp,0x2
+       4:	9a818193          	addi	gp,gp,-1624 # 19a8 <__global_pointer$>
+    .option pop
+
+    /* ---- stack pointer: top of LMB (grows down) ---- */
+    la      sp, _estack
+       8:	00020117          	auipc	sp,0x20
+       c:	ff810113          	addi	sp,sp,-8 # 20000 <_estack>
+
+    /* ---- install the trap handler (direct mode: mtvec low bits = 00) ---- */
+    la      t0, trap_entry
+      10:	00000297          	auipc	t0,0x0
+      14:	04428293          	addi	t0,t0,68 # 54 <trap_entry>
+    csrw    mtvec, t0
+      18:	30529073          	csrw	mtvec,t0
+
+    /* ---- zero .bss : [__bss_start, __bss_end) , word-aligned by the ld ---- */
+    la      t0, __bss_start
+      1c:	00001297          	auipc	t0,0x1
+      20:	18c28293          	addi	t0,t0,396 # 11a8 <g_flush_sink>
+    la      t1, __bss_end
+      24:	00001317          	auipc	t1,0x1
+      28:	18830313          	addi	t1,t1,392 # 11ac <__bss_end>
+1:
+    bgeu    t0, t1, 2f
+      2c:	0062f863          	bgeu	t0,t1,3c <_start+0x3c>
+    sw      zero, 0(t0)
+      30:	0002a023          	sw	zero,0(t0)
+    addi    t0, t0, 4
+      34:	00428293          	addi	t0,t0,4
+    j       1b
+      38:	ff5ff06f          	j	2c <_start+0x2c>
+2:
+
+    /* ---- call main(0, NULL) ; we never expect it to return ---- */
+    li      a0, 0
+      3c:	00000513          	li	a0,0
+    li      a1, 0
+      40:	00000593          	li	a1,0
+    call    main
+      44:	00000097          	auipc	ra,0x0
+      48:	02c080e7          	jalr	44(ra) # 70 <main>
+
+    /* ---- main returned: park the core ---- */
+.Lhalt:
+    wfi
+      4c:	10500073          	wfi
+    j       .Lhalt
+      50:	ffdff06f          	j	4c <_start+0x4c>
+
+00000054 <trap_entry>:
+ */
+    .balign 4
+    .global trap_entry
+    .type   trap_entry, @function
+trap_entry:
+    csrr    a0, mcause
+      54:	34202573          	csrr	a0,mcause
+    csrr    a1, mepc
+      58:	341025f3          	csrr	a1,mepc
+    csrr    a2, mtval
+      5c:	34302673          	csrr	a2,mtval
+    call    trap_report         /* void trap_report(u32 mcause, u32 mepc, u32 mtval) */
+      60:	00001097          	auipc	ra,0x1
+      64:	c0c080e7          	jalr	-1012(ra) # c6c <trap_report>
+3:
+    wfi
+      68:	10500073          	wfi
+    j       3b
+      6c:	ffdff06f          	j	68 <trap_entry+0x14>
+
+00000070 <main>:
+/* ------------------------------------------------------------------------- *
+ *  main
+ * ------------------------------------------------------------------------- */
+
+int main(void)
+{
+      70:	fb010113          	addi	sp,sp,-80
+      74:	04112623          	sw	ra,76(sp)
+    *(volatile uint32_t *)addr = val;
+      78:	406007b7          	lui	a5,0x40600
+      7c:	00300713          	li	a4,3
+{
+      80:	04812423          	sw	s0,72(sp)
+      84:	04912223          	sw	s1,68(sp)
+      88:	05212023          	sw	s2,64(sp)
+      8c:	03312e23          	sw	s3,60(sp)
+      90:	03412c23          	sw	s4,56(sp)
+      94:	03512a23          	sw	s5,52(sp)
+      98:	03612823          	sw	s6,48(sp)
+      9c:	03712623          	sw	s7,44(sp)
+      a0:	03812423          	sw	s8,40(sp)
+      a4:	03912223          	sw	s9,36(sp)
+      a8:	03a12023          	sw	s10,32(sp)
+      ac:	01b12e23          	sw	s11,28(sp)
+    *(volatile uint32_t *)addr = val;
+      b0:	00e7a623          	sw	a4,12(a5) # 4060000c <_estack+0x405e000c>
+      b4:	0007a623          	sw	zero,12(a5)
+    uart_init();
+
+    uart_puts("\n==============================================\n");
+      b8:	00001517          	auipc	a0,0x1
+      bc:	df850513          	addi	a0,a0,-520 # eb0 <trap_report+0x244>
+      c0:	00001097          	auipc	ra,0x1
+      c4:	8ec080e7          	jalr	-1812(ra) # 9ac <uart_puts>
+    uart_puts(" nanoSoC MicroBlaze-V  DDR4 memtest\n");
+      c8:	00001517          	auipc	a0,0x1
+      cc:	e1c50513          	addi	a0,a0,-484 # ee4 <trap_report+0x278>
+      d0:	00001097          	auipc	ra,0x1
+      d4:	8dc080e7          	jalr	-1828(ra) # 9ac <uart_puts>
+    uart_puts("==============================================\n");
+      d8:	00001517          	auipc	a0,0x1
+      dc:	e3450513          	addi	a0,a0,-460 # f0c <trap_report+0x2a0>
+      e0:	00001097          	auipc	ra,0x1
+      e4:	8cc080e7          	jalr	-1844(ra) # 9ac <uart_puts>
+    uart_puts(" ISA build : rv32im / ilp32 / medany / no-relax\n");
+      e8:	00001517          	auipc	a0,0x1
+      ec:	e5450513          	addi	a0,a0,-428 # f3c <trap_report+0x2d0>
+      f0:	00001097          	auipc	ra,0x1
+      f4:	8bc080e7          	jalr	-1860(ra) # 9ac <uart_puts>
+    uart_puts(" UART base : 0x"); uart_puthex(UART_BASE);
+      f8:	00001517          	auipc	a0,0x1
+      fc:	e7850513          	addi	a0,a0,-392 # f70 <trap_report+0x304>
+     100:	00001097          	auipc	ra,0x1
+     104:	8ac080e7          	jalr	-1876(ra) # 9ac <uart_puts>
+     108:	40600537          	lui	a0,0x40600
+     10c:	00001097          	auipc	ra,0x1
+     110:	8fc080e7          	jalr	-1796(ra) # a08 <uart_puthex>
+    uart_puts("  (must match mbv_soc.tcl assign_bd_address)\n");
+     114:	00001517          	auipc	a0,0x1
+     118:	e6c50513          	addi	a0,a0,-404 # f80 <trap_report+0x314>
+     11c:	00001097          	auipc	ra,0x1
+     120:	890080e7          	jalr	-1904(ra) # 9ac <uart_puts>
+    uart_puts(" DDR base  : 0x"); uart_puthex(DDR_BASE);
+     124:	00001517          	auipc	a0,0x1
+     128:	e8c50513          	addi	a0,a0,-372 # fb0 <trap_report+0x344>
+     12c:	00001097          	auipc	ra,0x1
+     130:	880080e7          	jalr	-1920(ra) # 9ac <uart_puts>
+     134:	80000537          	lui	a0,0x80000
+     138:	00001097          	auipc	ra,0x1
+     13c:	8d0080e7          	jalr	-1840(ra) # a08 <uart_puthex>
+    uart_puts("  aperture 0x"); uart_puthex(DDR_APERTURE); uart_puts(" (2 GiB)\n");
+     140:	00001517          	auipc	a0,0x1
+     144:	e8050513          	addi	a0,a0,-384 # fc0 <trap_report+0x354>
+     148:	00001097          	auipc	ra,0x1
+     14c:	864080e7          	jalr	-1948(ra) # 9ac <uart_puts>
+     150:	40000537          	lui	a0,0x40000
+     154:	00001097          	auipc	ra,0x1
+     158:	8b4080e7          	jalr	-1868(ra) # a08 <uart_puthex>
+     15c:	00001517          	auipc	a0,0x1
+     160:	e7450513          	addi	a0,a0,-396 # fd0 <trap_report+0x364>
+     164:	00001097          	auipc	ra,0x1
+     168:	848080e7          	jalr	-1976(ra) # 9ac <uart_puts>
+    uart_puts(" D-cache   : "); uart_putdec(DCACHE_BYTES);
+     16c:	00001517          	auipc	a0,0x1
+     170:	e7050513          	addi	a0,a0,-400 # fdc <trap_report+0x370>
+     174:	00001097          	auipc	ra,0x1
+     178:	838080e7          	jalr	-1992(ra) # 9ac <uart_puts>
+     17c:	00002537          	lui	a0,0x2
+     180:	00001097          	auipc	ra,0x1
+     184:	904080e7          	jalr	-1788(ra) # a84 <uart_putdec>
+    uart_puts(" B, flush window "); uart_putdec(FLUSH_BYTES);
+     188:	00001517          	auipc	a0,0x1
+     18c:	e6450513          	addi	a0,a0,-412 # fec <trap_report+0x380>
+     190:	00001097          	auipc	ra,0x1
+     194:	81c080e7          	jalr	-2020(ra) # 9ac <uart_puts>
+     198:	00004537          	lui	a0,0x4
+     19c:	00001097          	auipc	ra,0x1
+     1a0:	8e8080e7          	jalr	-1816(ra) # a84 <uart_putdec>
+    uart_puts(" B (read-thrash eviction; no cache CSRs on rv32im)\n");
+     1a4:	00001517          	auipc	a0,0x1
+     1a8:	e5c50513          	addi	a0,a0,-420 # 1000 <trap_report+0x394>
+     1ac:	00001097          	auipc	ra,0x1
+     1b0:	800080e7          	jalr	-2048(ra) # 9ac <uart_puts>
+    uart_puts("----------------------------------------------\n");
+     1b4:	00001517          	auipc	a0,0x1
+     1b8:	e8050513          	addi	a0,a0,-384 # 1034 <trap_report+0x3c8>
+     1bc:	00000097          	auipc	ra,0x0
+     1c0:	7f0080e7          	jalr	2032(ra) # 9ac <uart_puts>
+
+    uint32_t total_errors = 0;
+    uint32_t bytes_tested = 0;
+
+    /* --- Test 1: address bus --- */
+    uart_puts("[1] walking-ones ADDRESS test over aperture ... \n");
+     1c4:	00001517          	auipc	a0,0x1
+     1c8:	ea050513          	addi	a0,a0,-352 # 1064 <trap_report+0x3f8>
+     1cc:	00000097          	auipc	ra,0x0
+     1d0:	7e0080e7          	jalr	2016(ra) # 9ac <uart_puts>
+        base[off] = pattern;
+     1d4:	aaaab6b7          	lui	a3,0xaaaab
+    uart_puts("[1] walking-ones ADDRESS test over aperture ... \n");
+     1d8:	01c00413          	li	s0,28
+    for (off = 1; off < nwords; off <<= 1)
+     1dc:	00100713          	li	a4,1
+        base[off] = pattern;
+     1e0:	80000637          	lui	a2,0x80000
+     1e4:	aaa68693          	addi	a3,a3,-1366 # aaaaaaaa <_estack+0xaaa8aaaa>
+     1e8:	00271793          	slli	a5,a4,0x2
+     1ec:	00f607b3          	add	a5,a2,a5
+     1f0:	00d7a023          	sw	a3,0(a5)
+    for (off = 1; off < nwords; off <<= 1)
+     1f4:	fff40413          	addi	s0,s0,-1
+     1f8:	00171713          	slli	a4,a4,0x1
+     1fc:	fe0416e3          	bnez	s0,1e8 <main+0x178>
+    base[0] = anti;
+     200:	555557b7          	lui	a5,0x55555
+     204:	55578793          	addi	a5,a5,1365 # 55555555 <_estack+0x55535555>
+     208:	00f62023          	sw	a5,0(a2) # 80000000 <_estack+0x7ffe0000>
+        if (got != pattern) {
+     20c:	aaaab9b7          	lui	s3,0xaaaab
+    dcache_flush();
+     210:	00001097          	auipc	ra,0x1
+     214:	844080e7          	jalr	-1980(ra) # a54 <dcache_flush>
+     218:	01c00913          	li	s2,28
+    for (off = 1; off < nwords; off <<= 1) {
+     21c:	00100493          	li	s1,1
+        uint32_t got = base[off];
+     220:	80000a37          	lui	s4,0x80000
+        if (got != pattern) {
+     224:	aaa98993          	addi	s3,s3,-1366 # aaaaaaaa <_estack+0xaaa8aaaa>
+            if (errs < MAX_REPORT) report(&base[off], pattern, got);
+     228:	00700a93          	li	s5,7
+        uint32_t got = base[off];
+     22c:	00249513          	slli	a0,s1,0x2
+     230:	00aa0533          	add	a0,s4,a0
+     234:	00052603          	lw	a2,0(a0)
+        if (got != pattern) {
+     238:	01360663          	beq	a2,s3,244 <main+0x1d4>
+            if (errs < MAX_REPORT) report(&base[off], pattern, got);
+     23c:	208afe63          	bgeu	s5,s0,458 <main+0x3e8>
+            errs++;
+     240:	00140413          	addi	s0,s0,1
+    for (off = 1; off < nwords; off <<= 1) {
+     244:	fff90913          	addi	s2,s2,-1
+     248:	00149493          	slli	s1,s1,0x1
+     24c:	fe0910e3          	bnez	s2,22c <main+0x1bc>
+    base[0] = pattern;
+     250:	aaaab7b7          	lui	a5,0xaaaab
+     254:	aaa78913          	addi	s2,a5,-1366 # aaaaaaaa <_estack+0xaaa8aaaa>
+     258:	01212623          	sw	s2,12(sp)
+     25c:	800007b7          	lui	a5,0x80000
+     260:	0127a023          	sw	s2,0(a5) # 80000000 <_estack+0x7ffe0000>
+     264:	01c00793          	li	a5,28
+     268:	00f12223          	sw	a5,4(sp)
+    for (toff = 1; toff < nwords; toff <<= 1) {
+     26c:	00100d13          	li	s10,1
+     270:	00001497          	auipc	s1,0x1
+     274:	f3848493          	addi	s1,s1,-200 # 11a8 <g_flush_sink>
+        base[toff] = anti;
+     278:	80000db7          	lui	s11,0x80000
+     27c:	00001c97          	auipc	s9,0x1
+     280:	f18c8c93          	addi	s9,s9,-232 # 1194 <hd.0>
+     284:	002d1a13          	slli	s4,s10,0x2
+     288:	555557b7          	lui	a5,0x55555
+     28c:	014d8733          	add	a4,s11,s4
+     290:	55578793          	addi	a5,a5,1365 # 55555555 <_estack+0x55535555>
+     294:	00e12423          	sw	a4,8(sp)
+     298:	00f72023          	sw	a5,0(a4)
+    __asm__ volatile("fence rw,rw" ::: "memory");   /* order prior stores first */
+     29c:	0330000f          	fence	rw,rw
+    uint32_t acc = 0;
+     2a0:	00000713          	li	a4,0
+    __asm__ volatile("fence rw,rw" ::: "memory");   /* order prior stores first */
+     2a4:	980007b7          	lui	a5,0x98000
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     2a8:	98004637          	lui	a2,0x98004
+        acc += p[i];
+     2ac:	0007a683          	lw	a3,0(a5) # 98000000 <_estack+0x97fe0000>
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     2b0:	00478793          	addi	a5,a5,4
+        acc += p[i];
+     2b4:	00d70733          	add	a4,a4,a3
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     2b8:	fec79ae3          	bne	a5,a2,2ac <main+0x23c>
+    g_flush_sink = acc;                              /* defeat DCE */
+     2bc:	00e4a023          	sw	a4,0(s1)
+    __asm__ volatile("fence rw,rw" ::: "memory");
+     2c0:	0330000f          	fence	rw,rw
+        if (base[0] != pattern) {
+     2c4:	000da783          	lw	a5,0(s11) # 80000000 <_estack+0x7ffe0000>
+     2c8:	01278863          	beq	a5,s2,2d8 <main+0x268>
+            if (errs < MAX_REPORT) report(&base[0], pattern, base[0]);
+     2cc:	00700793          	li	a5,7
+     2d0:	2687f063          	bgeu	a5,s0,530 <main+0x4c0>
+            errs++;
+     2d4:	00140413          	addi	s0,s0,1
+    return *(volatile uint32_t *)addr;
+     2d8:	40600c37          	lui	s8,0x40600
+    *(volatile uint32_t *)addr = val;
+     2dc:	40600a37          	lui	s4,0x40600
+    __asm__ volatile("fence rw,rw" ::: "memory");   /* order prior stores first */
+     2e0:	01c00a93          	li	s5,28
+     2e4:	00100b13          	li	s6,1
+    return *(volatile uint32_t *)addr;
+     2e8:	008c0c13          	addi	s8,s8,8 # 40600008 <_estack+0x405e0008>
+    *(volatile uint32_t *)addr = val;
+     2ec:	004a0a13          	addi	s4,s4,4 # 40600004 <_estack+0x405e0004>
+    for (int i = 28; i >= 0; i -= 4)
+     2f0:	ffc00b93          	li	s7,-4
+            if (off == toff) continue;
+     2f4:	036d0063          	beq	s10,s6,314 <main+0x2a4>
+            uint32_t got = base[off];
+     2f8:	002b1893          	slli	a7,s6,0x2
+     2fc:	011d88b3          	add	a7,s11,a7
+     300:	0008a983          	lw	s3,0(a7)
+            if (got != pattern) {
+     304:	01298863          	beq	s3,s2,314 <main+0x2a4>
+                if (errs < MAX_REPORT) report(&base[off], pattern, got);
+     308:	00700793          	li	a5,7
+     30c:	1487fe63          	bgeu	a5,s0,468 <main+0x3f8>
+                errs++;
+     310:	00140413          	addi	s0,s0,1
+        for (off = 1; off < nwords; off <<= 1) {
+     314:	fffa8a93          	addi	s5,s5,-1
+     318:	001b1b13          	slli	s6,s6,0x1
+     31c:	fc0a9ce3          	bnez	s5,2f4 <main+0x284>
+        base[toff] = pattern;   /* restore before moving on */
+     320:	00812783          	lw	a5,8(sp)
+     324:	00c12703          	lw	a4,12(sp)
+    for (toff = 1; toff < nwords; toff <<= 1) {
+     328:	001d1d13          	slli	s10,s10,0x1
+        base[toff] = pattern;   /* restore before moving on */
+     32c:	00e7a023          	sw	a4,0(a5)
+    for (toff = 1; toff < nwords; toff <<= 1) {
+     330:	00412783          	lw	a5,4(sp)
+     334:	fff78793          	addi	a5,a5,-1
+     338:	00f12223          	sw	a5,4(sp)
+     33c:	f40794e3          	bnez	a5,284 <main+0x214>
+    uint32_t aper_words = DDR_APERTURE / 4u;        /* 0x2000_0000 words */
+    uint32_t e1 = addr_test((volatile uint32_t *)DDR_BASE, aper_words);
+    total_errors += e1;
+    uart_puts(e1 ? "    -> address test FAILED, errors=" : "    -> address test ok, errors=");
+     340:	00001517          	auipc	a0,0x1
+     344:	ac050513          	addi	a0,a0,-1344 # e00 <trap_report+0x194>
+     348:	00040663          	beqz	s0,354 <main+0x2e4>
+     34c:	00001517          	auipc	a0,0x1
+     350:	a9050513          	addi	a0,a0,-1392 # ddc <trap_report+0x170>
+     354:	00000097          	auipc	ra,0x0
+     358:	658080e7          	jalr	1624(ra) # 9ac <uart_puts>
+    uart_putdec(e1); uart_putc('\n');
+     35c:	00040513          	mv	a0,s0
+     360:	00000097          	auipc	ra,0x0
+     364:	724080e7          	jalr	1828(ra) # a84 <uart_putdec>
+    return *(volatile uint32_t *)addr;
+     368:	40600737          	lui	a4,0x40600
+     36c:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+     370:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     374:	0087f793          	andi	a5,a5,8
+     378:	fe079ce3          	bnez	a5,370 <main+0x300>
+    *(volatile uint32_t *)addr = val;
+     37c:	40600b37          	lui	s6,0x40600
+     380:	00a00793          	li	a5,10
+     384:	00fb2223          	sw	a5,4(s6) # 40600004 <_estack+0x405e0004>
+
+    /* --- Test 2: data bus --- */
+    uart_puts("[2] DATA-BUS test @0x");
+     388:	00001517          	auipc	a0,0x1
+     38c:	d1050513          	addi	a0,a0,-752 # 1098 <trap_report+0x42c>
+     390:	00000097          	auipc	ra,0x0
+     394:	61c080e7          	jalr	1564(ra) # 9ac <uart_puts>
+    uart_puthex(DDR_BASE + DATABUS_OFF);
+     398:	80100537          	lui	a0,0x80100
+     39c:	00000097          	auipc	ra,0x0
+     3a0:	66c080e7          	jalr	1644(ra) # a08 <uart_puthex>
+    uart_puts(" (walking 1s/0s, 64 patterns) ... \n");
+     3a4:	00001517          	auipc	a0,0x1
+     3a8:	d0c50513          	addi	a0,a0,-756 # 10b0 <trap_report+0x444>
+    return *(volatile uint32_t *)addr;
+     3ac:	406009b7          	lui	s3,0x40600
+    *(volatile uint32_t *)addr = val;
+     3b0:	004b0b13          	addi	s6,s6,4
+    uart_puts(" (walking 1s/0s, 64 patterns) ... \n");
+     3b4:	00000097          	auipc	ra,0x0
+     3b8:	5f8080e7          	jalr	1528(ra) # 9ac <uart_puts>
+    uint32_t errs = 0;
+     3bc:	00000913          	li	s2,0
+    uart_puts(" (walking 1s/0s, 64 patterns) ... \n");
+     3c0:	02000d13          	li	s10,32
+    for (bit = 1u; bit != 0u; bit <<= 1) {          /* walking ones  */
+     3c4:	00100c13          	li	s8,1
+        *addr = bit;
+     3c8:	80100cb7          	lui	s9,0x80100
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     3cc:	98004ab7          	lui	s5,0x98004
+    uart_puts("  MISMATCH @0x");
+     3d0:	00001a17          	auipc	s4,0x1
+     3d4:	93ca0a13          	addi	s4,s4,-1732 # d0c <trap_report+0xa0>
+     3d8:	00001b97          	auipc	s7,0x1
+     3dc:	dbcb8b93          	addi	s7,s7,-580 # 1194 <hd.0>
+    return *(volatile uint32_t *)addr;
+     3e0:	00898993          	addi	s3,s3,8 # 40600008 <_estack+0x405e0008>
+        *addr = bit;
+     3e4:	018ca023          	sw	s8,0(s9) # 80100000 <_estack+0x800e0000>
+    __asm__ volatile("fence rw,rw" ::: "memory");   /* order prior stores first */
+     3e8:	0330000f          	fence	rw,rw
+    uint32_t acc = 0;
+     3ec:	00000713          	li	a4,0
+    __asm__ volatile("fence rw,rw" ::: "memory");   /* order prior stores first */
+     3f0:	980007b7          	lui	a5,0x98000
+        acc += p[i];
+     3f4:	0007a683          	lw	a3,0(a5) # 98000000 <_estack+0x97fe0000>
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     3f8:	00478793          	addi	a5,a5,4
+        acc += p[i];
+     3fc:	00d70733          	add	a4,a4,a3
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     400:	ff579ae3          	bne	a5,s5,3f4 <main+0x384>
+    g_flush_sink = acc;                              /* defeat DCE */
+     404:	00e4a023          	sw	a4,0(s1)
+    __asm__ volatile("fence rw,rw" ::: "memory");
+     408:	0330000f          	fence	rw,rw
+        uint32_t got = *addr;
+     40c:	000cad83          	lw	s11,0(s9)
+        if (got != bit) { report(addr, bit, got); errs++; }
+     410:	1d8d8863          	beq	s11,s8,5e0 <main+0x570>
+    uart_puts("  MISMATCH @0x");
+     414:	000a0513          	mv	a0,s4
+     418:	00000097          	auipc	ra,0x0
+     41c:	594080e7          	jalr	1428(ra) # 9ac <uart_puts>
+     420:	03800693          	li	a3,56
+    for (int i = 28; i >= 0; i -= 4)
+     424:	01c00713          	li	a4,28
+     428:	ffc00613          	li	a2,-4
+    return *(volatile uint32_t *)addr;
+     42c:	0009a783          	lw	a5,0(s3)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     430:	0087f793          	andi	a5,a5,8
+     434:	fe079ce3          	bnez	a5,42c <main+0x3bc>
+    for (int i = 28; i >= 0; i -= 4)
+     438:	ffc70713          	addi	a4,a4,-4
+        uart_putc(hd[(v >> i) & 0xF]);
+     43c:	00ecd7b3          	srl	a5,s9,a4
+     440:	00f7f793          	andi	a5,a5,15
+    *(volatile uint32_t *)addr = val;
+     444:	00db2023          	sw	a3,0(s6)
+        uart_putc(hd[(v >> i) & 0xF]);
+     448:	00fb87b3          	add	a5,s7,a5
+    for (int i = 28; i >= 0; i -= 4)
+     44c:	0ec70e63          	beq	a4,a2,548 <main+0x4d8>
+        uart_putc(hd[(v >> i) & 0xF]);
+     450:	0007c683          	lbu	a3,0(a5)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     454:	fd9ff06f          	j	42c <main+0x3bc>
+            if (errs < MAX_REPORT) report(&base[off], pattern, got);
+     458:	00098593          	mv	a1,s3
+     45c:	00000097          	auipc	ra,0x0
+     460:	6b8080e7          	jalr	1720(ra) # b14 <report>
+     464:	dddff06f          	j	240 <main+0x1d0>
+    uart_puts("  MISMATCH @0x");
+     468:	00001517          	auipc	a0,0x1
+     46c:	8a450513          	addi	a0,a0,-1884 # d0c <trap_report+0xa0>
+     470:	01112023          	sw	a7,0(sp)
+     474:	00000097          	auipc	ra,0x0
+     478:	538080e7          	jalr	1336(ra) # 9ac <uart_puts>
+    for (int i = 28; i >= 0; i -= 4)
+     47c:	00012883          	lw	a7,0(sp)
+     480:	01c00513          	li	a0,28
+        uart_putc(hd[(v >> i) & 0xF]);
+     484:	00a8d7b3          	srl	a5,a7,a0
+     488:	00f7f793          	andi	a5,a5,15
+     48c:	00fc87b3          	add	a5,s9,a5
+     490:	0007c303          	lbu	t1,0(a5)
+    return *(volatile uint32_t *)addr;
+     494:	000c2783          	lw	a5,0(s8)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     498:	0087f793          	andi	a5,a5,8
+     49c:	fe079ce3          	bnez	a5,494 <main+0x424>
+    *(volatile uint32_t *)addr = val;
+     4a0:	006a2023          	sw	t1,0(s4)
+    for (int i = 28; i >= 0; i -= 4)
+     4a4:	ffc50513          	addi	a0,a0,-4
+     4a8:	fd751ee3          	bne	a0,s7,484 <main+0x414>
+    uart_puts(" exp=0x");
+     4ac:	00001517          	auipc	a0,0x1
+     4b0:	87450513          	addi	a0,a0,-1932 # d20 <trap_report+0xb4>
+     4b4:	00000097          	auipc	ra,0x0
+     4b8:	4f8080e7          	jalr	1272(ra) # 9ac <uart_puts>
+    for (int i = 28; i >= 0; i -= 4)
+     4bc:	01c00513          	li	a0,28
+    *(volatile uint32_t *)addr = val;
+     4c0:	04100893          	li	a7,65
+    return *(volatile uint32_t *)addr;
+     4c4:	000c2783          	lw	a5,0(s8)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     4c8:	0087f793          	andi	a5,a5,8
+     4cc:	fe079ce3          	bnez	a5,4c4 <main+0x454>
+    *(volatile uint32_t *)addr = val;
+     4d0:	011a2023          	sw	a7,0(s4)
+    for (int i = 28; i >= 0; i -= 4)
+     4d4:	ffc50513          	addi	a0,a0,-4
+     4d8:	ff7516e3          	bne	a0,s7,4c4 <main+0x454>
+    uart_puts(" got=0x");
+     4dc:	00001517          	auipc	a0,0x1
+     4e0:	84c50513          	addi	a0,a0,-1972 # d28 <trap_report+0xbc>
+     4e4:	00000097          	auipc	ra,0x0
+     4e8:	4c8080e7          	jalr	1224(ra) # 9ac <uart_puts>
+    for (int i = 28; i >= 0; i -= 4)
+     4ec:	01c00513          	li	a0,28
+        uart_putc(hd[(v >> i) & 0xF]);
+     4f0:	00a9d7b3          	srl	a5,s3,a0
+     4f4:	00f7f793          	andi	a5,a5,15
+     4f8:	00fc87b3          	add	a5,s9,a5
+     4fc:	0007c883          	lbu	a7,0(a5)
+    return *(volatile uint32_t *)addr;
+     500:	000c2783          	lw	a5,0(s8)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     504:	0087f793          	andi	a5,a5,8
+     508:	fe079ce3          	bnez	a5,500 <main+0x490>
+    *(volatile uint32_t *)addr = val;
+     50c:	011a2023          	sw	a7,0(s4)
+    for (int i = 28; i >= 0; i -= 4)
+     510:	ffc50513          	addi	a0,a0,-4
+     514:	fd751ee3          	bne	a0,s7,4f0 <main+0x480>
+    return *(volatile uint32_t *)addr;
+     518:	000c2783          	lw	a5,0(s8)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     51c:	0087f793          	andi	a5,a5,8
+     520:	fe079ce3          	bnez	a5,518 <main+0x4a8>
+    *(volatile uint32_t *)addr = val;
+     524:	00a00793          	li	a5,10
+     528:	00fa2023          	sw	a5,0(s4)
+}
+     52c:	de5ff06f          	j	310 <main+0x2a0>
+            if (errs < MAX_REPORT) report(&base[0], pattern, base[0]);
+     530:	000da603          	lw	a2,0(s11)
+     534:	00c12583          	lw	a1,12(sp)
+     538:	80000537          	lui	a0,0x80000
+     53c:	00000097          	auipc	ra,0x0
+     540:	5d8080e7          	jalr	1496(ra) # b14 <report>
+     544:	d91ff06f          	j	2d4 <main+0x264>
+    uart_puts(" exp=0x");
+     548:	00000517          	auipc	a0,0x0
+     54c:	7d850513          	addi	a0,a0,2008 # d20 <trap_report+0xb4>
+     550:	00000097          	auipc	ra,0x0
+     554:	45c080e7          	jalr	1116(ra) # 9ac <uart_puts>
+    for (int i = 28; i >= 0; i -= 4)
+     558:	01c00713          	li	a4,28
+     55c:	ffc00613          	li	a2,-4
+        uart_putc(hd[(v >> i) & 0xF]);
+     560:	00ec57b3          	srl	a5,s8,a4
+     564:	00f7f793          	andi	a5,a5,15
+     568:	00fb87b3          	add	a5,s7,a5
+     56c:	0007c683          	lbu	a3,0(a5)
+    return *(volatile uint32_t *)addr;
+     570:	0009a783          	lw	a5,0(s3)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     574:	0087f793          	andi	a5,a5,8
+     578:	fe079ce3          	bnez	a5,570 <main+0x500>
+    *(volatile uint32_t *)addr = val;
+     57c:	00db2023          	sw	a3,0(s6)
+    for (int i = 28; i >= 0; i -= 4)
+     580:	ffc70713          	addi	a4,a4,-4
+     584:	fcc71ee3          	bne	a4,a2,560 <main+0x4f0>
+    uart_puts(" got=0x");
+     588:	00000517          	auipc	a0,0x0
+     58c:	7a050513          	addi	a0,a0,1952 # d28 <trap_report+0xbc>
+     590:	00000097          	auipc	ra,0x0
+     594:	41c080e7          	jalr	1052(ra) # 9ac <uart_puts>
+    for (int i = 28; i >= 0; i -= 4)
+     598:	01c00713          	li	a4,28
+     59c:	ffc00613          	li	a2,-4
+        uart_putc(hd[(v >> i) & 0xF]);
+     5a0:	00edd7b3          	srl	a5,s11,a4
+     5a4:	00f7f793          	andi	a5,a5,15
+     5a8:	00fb87b3          	add	a5,s7,a5
+     5ac:	0007c683          	lbu	a3,0(a5)
+    return *(volatile uint32_t *)addr;
+     5b0:	0009a783          	lw	a5,0(s3)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     5b4:	0087f793          	andi	a5,a5,8
+     5b8:	fe079ce3          	bnez	a5,5b0 <main+0x540>
+    *(volatile uint32_t *)addr = val;
+     5bc:	00db2023          	sw	a3,0(s6)
+    for (int i = 28; i >= 0; i -= 4)
+     5c0:	ffc70713          	addi	a4,a4,-4
+     5c4:	fcc71ee3          	bne	a4,a2,5a0 <main+0x530>
+    return *(volatile uint32_t *)addr;
+     5c8:	0009a783          	lw	a5,0(s3)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     5cc:	0087f793          	andi	a5,a5,8
+     5d0:	fe079ce3          	bnez	a5,5c8 <main+0x558>
+    *(volatile uint32_t *)addr = val;
+     5d4:	00a00793          	li	a5,10
+     5d8:	00fb2023          	sw	a5,0(s6)
+        if (got != bit) { report(addr, bit, got); errs++; }
+     5dc:	00190913          	addi	s2,s2,1
+    for (bit = 1u; bit != 0u; bit <<= 1) {          /* walking ones  */
+     5e0:	fffd0d13          	addi	s10,s10,-1
+     5e4:	001c1c13          	slli	s8,s8,0x1
+     5e8:	de0d1ee3          	bnez	s10,3e4 <main+0x374>
+    return *(volatile uint32_t *)addr;
+     5ec:	406009b7          	lui	s3,0x40600
+    *(volatile uint32_t *)addr = val;
+     5f0:	40600b37          	lui	s6,0x40600
+     5f4:	02000d13          	li	s10,32
+    for (bit = 1u; bit != 0u; bit <<= 1) {          /* walking zeros */
+     5f8:	00100c93          	li	s9,1
+        *addr = w;
+     5fc:	80100c37          	lui	s8,0x80100
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     600:	98004ab7          	lui	s5,0x98004
+     604:	00001b97          	auipc	s7,0x1
+     608:	b90b8b93          	addi	s7,s7,-1136 # 1194 <hd.0>
+    return *(volatile uint32_t *)addr;
+     60c:	00898993          	addi	s3,s3,8 # 40600008 <_estack+0x405e0008>
+    *(volatile uint32_t *)addr = val;
+     610:	004b0b13          	addi	s6,s6,4 # 40600004 <_estack+0x405e0004>
+        uint32_t w = ~bit;
+     614:	fffcca13          	not	s4,s9
+        *addr = w;
+     618:	014c2023          	sw	s4,0(s8) # 80100000 <_estack+0x800e0000>
+    __asm__ volatile("fence rw,rw" ::: "memory");   /* order prior stores first */
+     61c:	0330000f          	fence	rw,rw
+    uint32_t acc = 0;
+     620:	00000713          	li	a4,0
+    __asm__ volatile("fence rw,rw" ::: "memory");   /* order prior stores first */
+     624:	980007b7          	lui	a5,0x98000
+        acc += p[i];
+     628:	0007a683          	lw	a3,0(a5) # 98000000 <_estack+0x97fe0000>
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     62c:	00478793          	addi	a5,a5,4
+        acc += p[i];
+     630:	00d70733          	add	a4,a4,a3
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     634:	ff579ae3          	bne	a5,s5,628 <main+0x5b8>
+    g_flush_sink = acc;                              /* defeat DCE */
+     638:	00e4a023          	sw	a4,0(s1)
+    __asm__ volatile("fence rw,rw" ::: "memory");
+     63c:	0330000f          	fence	rw,rw
+        uint32_t got = *addr;
+     640:	000c2d83          	lw	s11,0(s8)
+        if (got != w) { report(addr, w, got); errs++; }
+     644:	0fba0263          	beq	s4,s11,728 <main+0x6b8>
+    uart_puts("  MISMATCH @0x");
+     648:	00000517          	auipc	a0,0x0
+     64c:	6c450513          	addi	a0,a0,1732 # d0c <trap_report+0xa0>
+     650:	00000097          	auipc	ra,0x0
+     654:	35c080e7          	jalr	860(ra) # 9ac <uart_puts>
+     658:	03800693          	li	a3,56
+    for (int i = 28; i >= 0; i -= 4)
+     65c:	01c00713          	li	a4,28
+     660:	ffc00593          	li	a1,-4
+    return *(volatile uint32_t *)addr;
+     664:	0009a783          	lw	a5,0(s3)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     668:	0087f793          	andi	a5,a5,8
+     66c:	fe079ce3          	bnez	a5,664 <main+0x5f4>
+    for (int i = 28; i >= 0; i -= 4)
+     670:	ffc70713          	addi	a4,a4,-4
+        uart_putc(hd[(v >> i) & 0xF]);
+     674:	00ec57b3          	srl	a5,s8,a4
+     678:	00f7f793          	andi	a5,a5,15
+    *(volatile uint32_t *)addr = val;
+     67c:	00db2023          	sw	a3,0(s6)
+        uart_putc(hd[(v >> i) & 0xF]);
+     680:	00fb87b3          	add	a5,s7,a5
+    for (int i = 28; i >= 0; i -= 4)
+     684:	00b70663          	beq	a4,a1,690 <main+0x620>
+        uart_putc(hd[(v >> i) & 0xF]);
+     688:	0007c683          	lbu	a3,0(a5)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     68c:	fd9ff06f          	j	664 <main+0x5f4>
+    uart_puts(" exp=0x");
+     690:	00000517          	auipc	a0,0x0
+     694:	69050513          	addi	a0,a0,1680 # d20 <trap_report+0xb4>
+     698:	00000097          	auipc	ra,0x0
+     69c:	314080e7          	jalr	788(ra) # 9ac <uart_puts>
+    for (int i = 28; i >= 0; i -= 4)
+     6a0:	01c00713          	li	a4,28
+     6a4:	ffc00593          	li	a1,-4
+        uart_putc(hd[(v >> i) & 0xF]);
+     6a8:	00ea57b3          	srl	a5,s4,a4
+     6ac:	00f7f793          	andi	a5,a5,15
+     6b0:	00fb87b3          	add	a5,s7,a5
+     6b4:	0007c683          	lbu	a3,0(a5)
+    return *(volatile uint32_t *)addr;
+     6b8:	0009a783          	lw	a5,0(s3)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     6bc:	0087f793          	andi	a5,a5,8
+     6c0:	fe079ce3          	bnez	a5,6b8 <main+0x648>
+    *(volatile uint32_t *)addr = val;
+     6c4:	00db2023          	sw	a3,0(s6)
+    for (int i = 28; i >= 0; i -= 4)
+     6c8:	ffc70713          	addi	a4,a4,-4
+     6cc:	fcb71ee3          	bne	a4,a1,6a8 <main+0x638>
+    uart_puts(" got=0x");
+     6d0:	00000517          	auipc	a0,0x0
+     6d4:	65850513          	addi	a0,a0,1624 # d28 <trap_report+0xbc>
+     6d8:	00000097          	auipc	ra,0x0
+     6dc:	2d4080e7          	jalr	724(ra) # 9ac <uart_puts>
+    for (int i = 28; i >= 0; i -= 4)
+     6e0:	01c00713          	li	a4,28
+     6e4:	ffc00613          	li	a2,-4
+        uart_putc(hd[(v >> i) & 0xF]);
+     6e8:	00edd7b3          	srl	a5,s11,a4
+     6ec:	00f7f793          	andi	a5,a5,15
+     6f0:	00fb87b3          	add	a5,s7,a5
+     6f4:	0007c683          	lbu	a3,0(a5)
+    return *(volatile uint32_t *)addr;
+     6f8:	0009a783          	lw	a5,0(s3)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     6fc:	0087f793          	andi	a5,a5,8
+     700:	fe079ce3          	bnez	a5,6f8 <main+0x688>
+    *(volatile uint32_t *)addr = val;
+     704:	00db2023          	sw	a3,0(s6)
+    for (int i = 28; i >= 0; i -= 4)
+     708:	ffc70713          	addi	a4,a4,-4
+     70c:	fcc71ee3          	bne	a4,a2,6e8 <main+0x678>
+    return *(volatile uint32_t *)addr;
+     710:	0009a783          	lw	a5,0(s3)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     714:	0087f793          	andi	a5,a5,8
+     718:	fe079ce3          	bnez	a5,710 <main+0x6a0>
+    *(volatile uint32_t *)addr = val;
+     71c:	00a00793          	li	a5,10
+     720:	00fb2023          	sw	a5,0(s6)
+        if (got != w) { report(addr, w, got); errs++; }
+     724:	00190913          	addi	s2,s2,1
+    for (bit = 1u; bit != 0u; bit <<= 1) {          /* walking zeros */
+     728:	fffd0d13          	addi	s10,s10,-1
+     72c:	001c9c93          	slli	s9,s9,0x1
+     730:	ee0d12e3          	bnez	s10,614 <main+0x5a4>
+    uint32_t e2 = databus_test((volatile uint32_t *)(DDR_BASE + DATABUS_OFF));
+    total_errors += e2;
+     734:	01240433          	add	s0,s0,s2
+    bytes_tested += 64u * 4u;
+    uart_puts(e2 ? "    -> data-bus test FAILED, errors=" : "    -> data-bus test ok, errors=");
+     738:	00000517          	auipc	a0,0x0
+     73c:	71050513          	addi	a0,a0,1808 # e48 <trap_report+0x1dc>
+     740:	00090663          	beqz	s2,74c <main+0x6dc>
+     744:	00000517          	auipc	a0,0x0
+     748:	6dc50513          	addi	a0,a0,1756 # e20 <trap_report+0x1b4>
+     74c:	00000097          	auipc	ra,0x0
+     750:	260080e7          	jalr	608(ra) # 9ac <uart_puts>
+    uart_putdec(e2); uart_putc('\n');
+     754:	00090513          	mv	a0,s2
+     758:	00000097          	auipc	ra,0x0
+     75c:	32c080e7          	jalr	812(ra) # a84 <uart_putdec>
+    return *(volatile uint32_t *)addr;
+     760:	406007b7          	lui	a5,0x40600
+     764:	00878793          	addi	a5,a5,8 # 40600008 <_estack+0x405e0008>
+     768:	0007a903          	lw	s2,0(a5)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     76c:	00897913          	andi	s2,s2,8
+     770:	fe091ce3          	bnez	s2,768 <main+0x6f8>
+    *(volatile uint32_t *)addr = val;
+     774:	00a00713          	li	a4,10
+     778:	406007b7          	lui	a5,0x40600
+     77c:	00e7a223          	sw	a4,4(a5) # 40600004 <_estack+0x405e0004>
+
+    /* --- Test 3: device / pattern --- */
+    uart_puts("[3] DEVICE test 0x"); uart_puthex(DEV_BYTES);
+     780:	00001517          	auipc	a0,0x1
+     784:	95450513          	addi	a0,a0,-1708 # 10d4 <trap_report+0x468>
+     788:	00000097          	auipc	ra,0x0
+     78c:	224080e7          	jalr	548(ra) # 9ac <uart_puts>
+     790:	00040537          	lui	a0,0x40
+     794:	00000097          	auipc	ra,0x0
+     798:	274080e7          	jalr	628(ra) # a08 <uart_puthex>
+    uart_puts(" bytes @0x"); uart_puthex(DDR_BASE + DEV_OFF);
+     79c:	00001517          	auipc	a0,0x1
+     7a0:	94c50513          	addi	a0,a0,-1716 # 10e8 <trap_report+0x47c>
+     7a4:	00000097          	auipc	ra,0x0
+     7a8:	208080e7          	jalr	520(ra) # 9ac <uart_puts>
+     7ac:	80000537          	lui	a0,0x80000
+     7b0:	00000097          	auipc	ra,0x0
+     7b4:	258080e7          	jalr	600(ra) # a08 <uart_puthex>
+    uart_puts(" (xorshift seed 0x"); uart_puthex(SEED); uart_puts(") ... \n");
+     7b8:	00001517          	auipc	a0,0x1
+     7bc:	93c50513          	addi	a0,a0,-1732 # 10f4 <trap_report+0x488>
+     7c0:	00000097          	auipc	ra,0x0
+     7c4:	1ec080e7          	jalr	492(ra) # 9ac <uart_puts>
+     7c8:	a5a5f537          	lui	a0,0xa5a5f
+     7cc:	00d50513          	addi	a0,a0,13 # a5a5f00d <_estack+0xa5a3f00d>
+     7d0:	00000097          	auipc	ra,0x0
+     7d4:	238080e7          	jalr	568(ra) # a08 <uart_puthex>
+     7d8:	00001517          	auipc	a0,0x1
+     7dc:	8f450513          	addi	a0,a0,-1804 # 10cc <trap_report+0x460>
+     7e0:	00000097          	auipc	ra,0x0
+     7e4:	1cc080e7          	jalr	460(ra) # 9ac <uart_puts>
+    uint32_t s = seed;
+     7e8:	a5a5f737          	lui	a4,0xa5a5f
+    uart_puts(" (xorshift seed 0x"); uart_puthex(SEED); uart_puts(") ... \n");
+     7ec:	800006b7          	lui	a3,0x80000
+    uint32_t s = seed;
+     7f0:	00d70713          	addi	a4,a4,13 # a5a5f00d <_estack+0xa5a3f00d>
+    for (uint32_t i = 0; i < nwords; ++i)
+     7f4:	80040637          	lui	a2,0x80040
+    x ^= x << 13;
+     7f8:	00d71793          	slli	a5,a4,0xd
+     7fc:	00e7c7b3          	xor	a5,a5,a4
+    x ^= x >> 17;
+     800:	0117d713          	srli	a4,a5,0x11
+     804:	00e7c7b3          	xor	a5,a5,a4
+    x ^= x << 5;
+     808:	00579713          	slli	a4,a5,0x5
+     80c:	00e7c733          	xor	a4,a5,a4
+        base[i] = xorshift32(&s);
+     810:	00e6a023          	sw	a4,0(a3) # 80000000 <_estack+0x7ffe0000>
+    for (uint32_t i = 0; i < nwords; ++i)
+     814:	00468693          	addi	a3,a3,4
+     818:	fec690e3          	bne	a3,a2,7f8 <main+0x788>
+    s = seed;
+     81c:	a5a5f4b7          	lui	s1,0xa5a5f
+    dcache_flush();
+     820:	00000097          	auipc	ra,0x0
+     824:	234080e7          	jalr	564(ra) # a54 <dcache_flush>
+     828:	800009b7          	lui	s3,0x80000
+    s = seed;
+     82c:	00d48493          	addi	s1,s1,13 # a5a5f00d <_estack+0xa5a3f00d>
+            if (errs < MAX_REPORT) report(&base[i], exp, got);
+     830:	00700a93          	li	s5,7
+    for (uint32_t i = 0; i < nwords; ++i) {
+     834:	80040a37          	lui	s4,0x80040
+    x ^= x << 13;
+     838:	00d49793          	slli	a5,s1,0xd
+     83c:	0097c7b3          	xor	a5,a5,s1
+    x ^= x >> 17;
+     840:	0117d713          	srli	a4,a5,0x11
+     844:	00e7c7b3          	xor	a5,a5,a4
+        uint32_t got = base[i];
+     848:	0009a603          	lw	a2,0(s3) # 80000000 <_estack+0x7ffe0000>
+    x ^= x << 5;
+     84c:	00579493          	slli	s1,a5,0x5
+     850:	0097c4b3          	xor	s1,a5,s1
+        if (got != exp) {
+     854:	00c48663          	beq	s1,a2,860 <main+0x7f0>
+            if (errs < MAX_REPORT) report(&base[i], exp, got);
+     858:	132af663          	bgeu	s5,s2,984 <main+0x914>
+            errs++;
+     85c:	00190913          	addi	s2,s2,1
+    for (uint32_t i = 0; i < nwords; ++i) {
+     860:	00498993          	addi	s3,s3,4
+     864:	fd499ae3          	bne	s3,s4,838 <main+0x7c8>
+    uint32_t dev_words = DEV_BYTES / 4u;
+    uint32_t e3 = device_test((volatile uint32_t *)(DDR_BASE + DEV_OFF), dev_words, SEED);
+    total_errors += e3;
+     868:	01240433          	add	s0,s0,s2
+    bytes_tested += DEV_BYTES;
+    uart_puts(e3 ? "    -> device test FAILED, errors=" : "    -> device test ok, errors=");
+     86c:	00000517          	auipc	a0,0x0
+     870:	62450513          	addi	a0,a0,1572 # e90 <trap_report+0x224>
+     874:	00090663          	beqz	s2,880 <main+0x810>
+     878:	00000517          	auipc	a0,0x0
+     87c:	5f450513          	addi	a0,a0,1524 # e6c <trap_report+0x200>
+     880:	00000097          	auipc	ra,0x0
+     884:	12c080e7          	jalr	300(ra) # 9ac <uart_puts>
+    uart_putdec(e3); uart_putc('\n');
+     888:	00090513          	mv	a0,s2
+     88c:	00000097          	auipc	ra,0x0
+     890:	1f8080e7          	jalr	504(ra) # a84 <uart_putdec>
+    return *(volatile uint32_t *)addr;
+     894:	40600737          	lui	a4,0x40600
+     898:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+     89c:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     8a0:	0087f793          	andi	a5,a5,8
+     8a4:	fe079ce3          	bnez	a5,89c <main+0x82c>
+    *(volatile uint32_t *)addr = val;
+     8a8:	00a00713          	li	a4,10
+     8ac:	406007b7          	lui	a5,0x40600
+     8b0:	00e7a223          	sw	a4,4(a5) # 40600004 <_estack+0x405e0004>
+
+    /* --- Summary --- */
+    uart_puts("----------------------------------------------\n");
+     8b4:	00000517          	auipc	a0,0x0
+     8b8:	78050513          	addi	a0,a0,1920 # 1034 <trap_report+0x3c8>
+     8bc:	00000097          	auipc	ra,0x0
+     8c0:	0f0080e7          	jalr	240(ra) # 9ac <uart_puts>
+    uart_puts(" bytes verified : "); uart_putdec(bytes_tested);
+     8c4:	00001517          	auipc	a0,0x1
+     8c8:	84450513          	addi	a0,a0,-1980 # 1108 <trap_report+0x49c>
+     8cc:	00000097          	auipc	ra,0x0
+     8d0:	0e0080e7          	jalr	224(ra) # 9ac <uart_puts>
+     8d4:	00040537          	lui	a0,0x40
+     8d8:	10050513          	addi	a0,a0,256 # 40100 <_estack+0x20100>
+     8dc:	00000097          	auipc	ra,0x0
+     8e0:	1a8080e7          	jalr	424(ra) # a84 <uart_putdec>
+    uart_puts(" (device+data-bus; address test strides the full aperture)\n");
+     8e4:	00001517          	auipc	a0,0x1
+     8e8:	83850513          	addi	a0,a0,-1992 # 111c <trap_report+0x4b0>
+     8ec:	00000097          	auipc	ra,0x0
+     8f0:	0c0080e7          	jalr	192(ra) # 9ac <uart_puts>
+    uart_puts(" total errors   : "); uart_putdec(total_errors); uart_putc('\n');
+     8f4:	00001517          	auipc	a0,0x1
+     8f8:	86450513          	addi	a0,a0,-1948 # 1158 <trap_report+0x4ec>
+     8fc:	00000097          	auipc	ra,0x0
+     900:	0b0080e7          	jalr	176(ra) # 9ac <uart_puts>
+     904:	00040513          	mv	a0,s0
+     908:	00000097          	auipc	ra,0x0
+     90c:	17c080e7          	jalr	380(ra) # a84 <uart_putdec>
+    return *(volatile uint32_t *)addr;
+     910:	40600737          	lui	a4,0x40600
+     914:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+     918:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     91c:	0087f793          	andi	a5,a5,8
+     920:	fe079ce3          	bnez	a5,918 <main+0x8a8>
+    *(volatile uint32_t *)addr = val;
+     924:	406007b7          	lui	a5,0x40600
+     928:	00a00713          	li	a4,10
+     92c:	00e7a223          	sw	a4,4(a5) # 40600004 <_estack+0x405e0004>
+    if (total_errors == 0)
+     930:	06041463          	bnez	s0,998 <main+0x928>
+        uart_puts("\n****  PASS  ****\n");
+     934:	00001517          	auipc	a0,0x1
+     938:	83850513          	addi	a0,a0,-1992 # 116c <trap_report+0x500>
+     93c:	00000097          	auipc	ra,0x0
+     940:	070080e7          	jalr	112(ra) # 9ac <uart_puts>
+    else
+        uart_puts("\n####  FAIL  ####\n");
+
+    return 0;   /* crt0 parks the core */
+}
+     944:	04c12083          	lw	ra,76(sp)
+     948:	04812403          	lw	s0,72(sp)
+     94c:	04412483          	lw	s1,68(sp)
+     950:	04012903          	lw	s2,64(sp)
+     954:	03c12983          	lw	s3,60(sp)
+     958:	03812a03          	lw	s4,56(sp)
+     95c:	03412a83          	lw	s5,52(sp)
+     960:	03012b03          	lw	s6,48(sp)
+     964:	02c12b83          	lw	s7,44(sp)
+     968:	02812c03          	lw	s8,40(sp)
+     96c:	02412c83          	lw	s9,36(sp)
+     970:	02012d03          	lw	s10,32(sp)
+     974:	01c12d83          	lw	s11,28(sp)
+     978:	00000513          	li	a0,0
+     97c:	05010113          	addi	sp,sp,80
+     980:	00008067          	ret
+            if (errs < MAX_REPORT) report(&base[i], exp, got);
+     984:	00048593          	mv	a1,s1
+     988:	00098513          	mv	a0,s3
+     98c:	00000097          	auipc	ra,0x0
+     990:	188080e7          	jalr	392(ra) # b14 <report>
+     994:	ec9ff06f          	j	85c <main+0x7ec>
+        uart_puts("\n####  FAIL  ####\n");
+     998:	00000517          	auipc	a0,0x0
+     99c:	7e850513          	addi	a0,a0,2024 # 1180 <trap_report+0x514>
+     9a0:	00000097          	auipc	ra,0x0
+     9a4:	00c080e7          	jalr	12(ra) # 9ac <uart_puts>
+     9a8:	f9dff06f          	j	944 <main+0x8d4>
+
+000009ac <uart_puts>:
+    for (; *s; ++s) {
+     9ac:	00054783          	lbu	a5,0(a0)
+     9b0:	04078063          	beqz	a5,9f0 <uart_puts+0x44>
+    return *(volatile uint32_t *)addr;
+     9b4:	40600737          	lui	a4,0x40600
+    *(volatile uint32_t *)addr = val;
+     9b8:	40600637          	lui	a2,0x40600
+        if (*s == '\n')
+     9bc:	00a00593          	li	a1,10
+    return *(volatile uint32_t *)addr;
+     9c0:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+    *(volatile uint32_t *)addr = val;
+     9c4:	00460613          	addi	a2,a2,4 # 40600004 <_estack+0x405e0004>
+     9c8:	00d00813          	li	a6,13
+        if (*s == '\n')
+     9cc:	02b78463          	beq	a5,a1,9f4 <uart_puts+0x48>
+        uart_putc(*s);
+     9d0:	00054683          	lbu	a3,0(a0)
+    return *(volatile uint32_t *)addr;
+     9d4:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     9d8:	0087f793          	andi	a5,a5,8
+     9dc:	fe079ce3          	bnez	a5,9d4 <uart_puts+0x28>
+    *(volatile uint32_t *)addr = val;
+     9e0:	00d62023          	sw	a3,0(a2)
+    for (; *s; ++s) {
+     9e4:	00154783          	lbu	a5,1(a0)
+     9e8:	00150513          	addi	a0,a0,1
+     9ec:	fe0790e3          	bnez	a5,9cc <uart_puts+0x20>
+}
+     9f0:	00008067          	ret
+    return *(volatile uint32_t *)addr;
+     9f4:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     9f8:	0087f793          	andi	a5,a5,8
+     9fc:	fe079ce3          	bnez	a5,9f4 <uart_puts+0x48>
+    *(volatile uint32_t *)addr = val;
+     a00:	01062023          	sw	a6,0(a2)
+}
+     a04:	fcdff06f          	j	9d0 <uart_puts+0x24>
+
+00000a08 <uart_puthex>:
+    return *(volatile uint32_t *)addr;
+     a08:	40600737          	lui	a4,0x40600
+    *(volatile uint32_t *)addr = val;
+     a0c:	406005b7          	lui	a1,0x40600
+    for (int i = 28; i >= 0; i -= 4)
+     a10:	01c00693          	li	a3,28
+     a14:	00000897          	auipc	a7,0x0
+     a18:	78088893          	addi	a7,a7,1920 # 1194 <hd.0>
+    return *(volatile uint32_t *)addr;
+     a1c:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+    *(volatile uint32_t *)addr = val;
+     a20:	00458593          	addi	a1,a1,4 # 40600004 <_estack+0x405e0004>
+    for (int i = 28; i >= 0; i -= 4)
+     a24:	ffc00813          	li	a6,-4
+        uart_putc(hd[(v >> i) & 0xF]);
+     a28:	00d557b3          	srl	a5,a0,a3
+     a2c:	00f7f793          	andi	a5,a5,15
+     a30:	00f887b3          	add	a5,a7,a5
+     a34:	0007c603          	lbu	a2,0(a5)
+    return *(volatile uint32_t *)addr;
+     a38:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     a3c:	0087f793          	andi	a5,a5,8
+     a40:	fe079ce3          	bnez	a5,a38 <uart_puthex+0x30>
+    *(volatile uint32_t *)addr = val;
+     a44:	00c5a023          	sw	a2,0(a1)
+    for (int i = 28; i >= 0; i -= 4)
+     a48:	ffc68693          	addi	a3,a3,-4
+     a4c:	fd069ee3          	bne	a3,a6,a28 <uart_puthex+0x20>
+}
+     a50:	00008067          	ret
+
+00000a54 <dcache_flush>:
+    __asm__ volatile("fence rw,rw" ::: "memory");   /* order prior stores first */
+     a54:	0330000f          	fence	rw,rw
+     a58:	980007b7          	lui	a5,0x98000
+    uint32_t acc = 0;
+     a5c:	00000713          	li	a4,0
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     a60:	98004637          	lui	a2,0x98004
+        acc += p[i];
+     a64:	0007a683          	lw	a3,0(a5) # 98000000 <_estack+0x97fe0000>
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     a68:	00478793          	addi	a5,a5,4
+        acc += p[i];
+     a6c:	00d70733          	add	a4,a4,a3
+    for (uint32_t i = 0; i < FLUSH_BYTES / 4u; ++i)
+     a70:	fec79ae3          	bne	a5,a2,a64 <dcache_flush+0x10>
+    g_flush_sink = acc;                              /* defeat DCE */
+     a74:	00000797          	auipc	a5,0x0
+     a78:	72e7aa23          	sw	a4,1844(a5) # 11a8 <g_flush_sink>
+    __asm__ volatile("fence rw,rw" ::: "memory");
+     a7c:	0330000f          	fence	rw,rw
+}
+     a80:	00008067          	ret
+
+00000a84 <uart_putdec>:
+    if (v == 0) { uart_putc('0'); return; }
+     a84:	06050663          	beqz	a0,af0 <uart_putdec+0x6c>
+{
+     a88:	ff010113          	addi	sp,sp,-16
+     a8c:	00000713          	li	a4,0
+     a90:	00410613          	addi	a2,sp,4
+     a94:	00a00593          	li	a1,10
+     a98:	00900893          	li	a7,9
+    while (v) { buf[n++] = (char)('0' + (v % 10u)); v /= 10u; }
+     a9c:	02b577b3          	remu	a5,a0,a1
+     aa0:	00170713          	addi	a4,a4,1
+     aa4:	00e606b3          	add	a3,a2,a4
+     aa8:	00050813          	mv	a6,a0
+     aac:	03078793          	addi	a5,a5,48
+     ab0:	fef68fa3          	sb	a5,-1(a3)
+     ab4:	02b55533          	divu	a0,a0,a1
+     ab8:	ff08e2e3          	bltu	a7,a6,a9c <uart_putdec+0x18>
+    return *(volatile uint32_t *)addr;
+     abc:	40600737          	lui	a4,0x40600
+    *(volatile uint32_t *)addr = val;
+     ac0:	40600537          	lui	a0,0x40600
+    return *(volatile uint32_t *)addr;
+     ac4:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+    *(volatile uint32_t *)addr = val;
+     ac8:	00450513          	addi	a0,a0,4 # 40600004 <_estack+0x405e0004>
+    while (n) uart_putc(buf[--n]);
+     acc:	fff6c583          	lbu	a1,-1(a3)
+    return *(volatile uint32_t *)addr;
+     ad0:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     ad4:	0087f793          	andi	a5,a5,8
+     ad8:	fe079ce3          	bnez	a5,ad0 <uart_putdec+0x4c>
+    *(volatile uint32_t *)addr = val;
+     adc:	00b52023          	sw	a1,0(a0)
+    while (n) uart_putc(buf[--n]);
+     ae0:	fff68693          	addi	a3,a3,-1
+     ae4:	fed614e3          	bne	a2,a3,acc <uart_putdec+0x48>
+}
+     ae8:	01010113          	addi	sp,sp,16
+     aec:	00008067          	ret
+    return *(volatile uint32_t *)addr;
+     af0:	40600737          	lui	a4,0x40600
+     af4:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+     af8:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     afc:	0087f793          	andi	a5,a5,8
+     b00:	fe079ce3          	bnez	a5,af8 <uart_putdec+0x74>
+    *(volatile uint32_t *)addr = val;
+     b04:	406007b7          	lui	a5,0x40600
+     b08:	03000713          	li	a4,48
+     b0c:	00e7a223          	sw	a4,4(a5) # 40600004 <_estack+0x405e0004>
+    if (v == 0) { uart_putc('0'); return; }
+     b10:	00008067          	ret
+
+00000b14 <report>:
+{
+     b14:	fe010113          	addi	sp,sp,-32
+     b18:	01312623          	sw	s3,12(sp)
+     b1c:	00050993          	mv	s3,a0
+    uart_puts("  MISMATCH @0x");
+     b20:	00000517          	auipc	a0,0x0
+     b24:	1ec50513          	addi	a0,a0,492 # d0c <trap_report+0xa0>
+{
+     b28:	00812c23          	sw	s0,24(sp)
+     b2c:	00912a23          	sw	s1,20(sp)
+     b30:	01212823          	sw	s2,16(sp)
+     b34:	00060493          	mv	s1,a2
+     b38:	00058913          	mv	s2,a1
+     b3c:	00112e23          	sw	ra,28(sp)
+    uart_puts("  MISMATCH @0x");
+     b40:	00000097          	auipc	ra,0x0
+     b44:	e6c080e7          	jalr	-404(ra) # 9ac <uart_puts>
+    return *(volatile uint32_t *)addr;
+     b48:	40600737          	lui	a4,0x40600
+    *(volatile uint32_t *)addr = val;
+     b4c:	40600637          	lui	a2,0x40600
+    for (int i = 28; i >= 0; i -= 4)
+     b50:	01c00693          	li	a3,28
+     b54:	00000417          	auipc	s0,0x0
+     b58:	64040413          	addi	s0,s0,1600 # 1194 <hd.0>
+    return *(volatile uint32_t *)addr;
+     b5c:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+    *(volatile uint32_t *)addr = val;
+     b60:	00460613          	addi	a2,a2,4 # 40600004 <_estack+0x405e0004>
+    for (int i = 28; i >= 0; i -= 4)
+     b64:	ffc00593          	li	a1,-4
+        uart_putc(hd[(v >> i) & 0xF]);
+     b68:	00d9d7b3          	srl	a5,s3,a3
+     b6c:	00f7f793          	andi	a5,a5,15
+     b70:	00f407b3          	add	a5,s0,a5
+     b74:	0007c803          	lbu	a6,0(a5)
+    return *(volatile uint32_t *)addr;
+     b78:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     b7c:	0087f793          	andi	a5,a5,8
+     b80:	fe079ce3          	bnez	a5,b78 <report+0x64>
+    *(volatile uint32_t *)addr = val;
+     b84:	01062023          	sw	a6,0(a2)
+    for (int i = 28; i >= 0; i -= 4)
+     b88:	ffc68693          	addi	a3,a3,-4
+     b8c:	fcb69ee3          	bne	a3,a1,b68 <report+0x54>
+    uart_puts(" exp=0x");
+     b90:	00000517          	auipc	a0,0x0
+     b94:	19050513          	addi	a0,a0,400 # d20 <trap_report+0xb4>
+     b98:	00000097          	auipc	ra,0x0
+     b9c:	e14080e7          	jalr	-492(ra) # 9ac <uart_puts>
+    return *(volatile uint32_t *)addr;
+     ba0:	40600737          	lui	a4,0x40600
+    *(volatile uint32_t *)addr = val;
+     ba4:	40600637          	lui	a2,0x40600
+    for (int i = 28; i >= 0; i -= 4)
+     ba8:	01c00693          	li	a3,28
+    return *(volatile uint32_t *)addr;
+     bac:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+    *(volatile uint32_t *)addr = val;
+     bb0:	00460613          	addi	a2,a2,4 # 40600004 <_estack+0x405e0004>
+    for (int i = 28; i >= 0; i -= 4)
+     bb4:	ffc00593          	li	a1,-4
+        uart_putc(hd[(v >> i) & 0xF]);
+     bb8:	00d957b3          	srl	a5,s2,a3
+     bbc:	00f7f793          	andi	a5,a5,15
+     bc0:	00f407b3          	add	a5,s0,a5
+     bc4:	0007c503          	lbu	a0,0(a5)
+    return *(volatile uint32_t *)addr;
+     bc8:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     bcc:	0087f793          	andi	a5,a5,8
+     bd0:	fe079ce3          	bnez	a5,bc8 <report+0xb4>
+    *(volatile uint32_t *)addr = val;
+     bd4:	00a62023          	sw	a0,0(a2)
+    for (int i = 28; i >= 0; i -= 4)
+     bd8:	ffc68693          	addi	a3,a3,-4
+     bdc:	fcb69ee3          	bne	a3,a1,bb8 <report+0xa4>
+    uart_puts(" got=0x");
+     be0:	00000517          	auipc	a0,0x0
+     be4:	14850513          	addi	a0,a0,328 # d28 <trap_report+0xbc>
+     be8:	00000097          	auipc	ra,0x0
+     bec:	dc4080e7          	jalr	-572(ra) # 9ac <uart_puts>
+    return *(volatile uint32_t *)addr;
+     bf0:	40600737          	lui	a4,0x40600
+    *(volatile uint32_t *)addr = val;
+     bf4:	40600637          	lui	a2,0x40600
+    for (int i = 28; i >= 0; i -= 4)
+     bf8:	01c00693          	li	a3,28
+    return *(volatile uint32_t *)addr;
+     bfc:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+    *(volatile uint32_t *)addr = val;
+     c00:	00460613          	addi	a2,a2,4 # 40600004 <_estack+0x405e0004>
+    for (int i = 28; i >= 0; i -= 4)
+     c04:	ffc00513          	li	a0,-4
+        uart_putc(hd[(v >> i) & 0xF]);
+     c08:	00d4d7b3          	srl	a5,s1,a3
+     c0c:	00f7f793          	andi	a5,a5,15
+     c10:	00f407b3          	add	a5,s0,a5
+     c14:	0007c583          	lbu	a1,0(a5)
+    return *(volatile uint32_t *)addr;
+     c18:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     c1c:	0087f793          	andi	a5,a5,8
+     c20:	fe079ce3          	bnez	a5,c18 <report+0x104>
+    *(volatile uint32_t *)addr = val;
+     c24:	00b62023          	sw	a1,0(a2)
+    for (int i = 28; i >= 0; i -= 4)
+     c28:	ffc68693          	addi	a3,a3,-4
+     c2c:	fca69ee3          	bne	a3,a0,c08 <report+0xf4>
+    return *(volatile uint32_t *)addr;
+     c30:	40600737          	lui	a4,0x40600
+     c34:	00870713          	addi	a4,a4,8 # 40600008 <_estack+0x405e0008>
+     c38:	00072783          	lw	a5,0(a4)
+    while (mmio_r32(UART_BASE + UART_STAT_OFF) & UART_SR_TX_FULL)
+     c3c:	0087f793          	andi	a5,a5,8
+     c40:	fe079ce3          	bnez	a5,c38 <report+0x124>
+}
+     c44:	01c12083          	lw	ra,28(sp)
+     c48:	01812403          	lw	s0,24(sp)
+    *(volatile uint32_t *)addr = val;
+     c4c:	406007b7          	lui	a5,0x40600
+     c50:	00a00713          	li	a4,10
+     c54:	00e7a223          	sw	a4,4(a5) # 40600004 <_estack+0x405e0004>
+}
+     c58:	01412483          	lw	s1,20(sp)
+     c5c:	01012903          	lw	s2,16(sp)
+     c60:	00c12983          	lw	s3,12(sp)
+     c64:	02010113          	addi	sp,sp,32
+     c68:	00008067          	ret
+
+00000c6c <trap_report>:
+{
+     c6c:	ff010113          	addi	sp,sp,-16
+     c70:	01212023          	sw	s2,0(sp)
+     c74:	00050913          	mv	s2,a0
+    uart_puts("\n*** TRAP ***  mcause=0x");
+     c78:	00000517          	auipc	a0,0x0
+     c7c:	0b850513          	addi	a0,a0,184 # d30 <trap_report+0xc4>
+{
+     c80:	00112623          	sw	ra,12(sp)
+     c84:	00812423          	sw	s0,8(sp)
+     c88:	00912223          	sw	s1,4(sp)
+     c8c:	00060413          	mv	s0,a2
+     c90:	00058493          	mv	s1,a1
+    uart_puts("\n*** TRAP ***  mcause=0x");
+     c94:	00000097          	auipc	ra,0x0
+     c98:	d18080e7          	jalr	-744(ra) # 9ac <uart_puts>
+    uart_puthex(mcause);
+     c9c:	00090513          	mv	a0,s2
+     ca0:	00000097          	auipc	ra,0x0
+     ca4:	d68080e7          	jalr	-664(ra) # a08 <uart_puthex>
+    uart_puts(" mepc=0x");
+     ca8:	00000517          	auipc	a0,0x0
+     cac:	0a450513          	addi	a0,a0,164 # d4c <trap_report+0xe0>
+     cb0:	00000097          	auipc	ra,0x0
+     cb4:	cfc080e7          	jalr	-772(ra) # 9ac <uart_puts>
+    uart_puthex(mepc);
+     cb8:	00048513          	mv	a0,s1
+     cbc:	00000097          	auipc	ra,0x0
+     cc0:	d4c080e7          	jalr	-692(ra) # a08 <uart_puthex>
+    uart_puts(" mtval=0x");
+     cc4:	00000517          	auipc	a0,0x0
+     cc8:	09450513          	addi	a0,a0,148 # d58 <trap_report+0xec>
+     ccc:	00000097          	auipc	ra,0x0
+     cd0:	ce0080e7          	jalr	-800(ra) # 9ac <uart_puts>
+    uart_puthex(mtval);
+     cd4:	00040513          	mv	a0,s0
+     cd8:	00000097          	auipc	ra,0x0
+     cdc:	d30080e7          	jalr	-720(ra) # a08 <uart_puthex>
+    uart_puts("\n(a load/store access fault here usually means DDR is not "
+     ce0:	00000517          	auipc	a0,0x0
+     ce4:	08450513          	addi	a0,a0,132 # d64 <trap_report+0xf8>
+     ce8:	00000097          	auipc	ra,0x0
+     cec:	cc4080e7          	jalr	-828(ra) # 9ac <uart_puts>
+    uart_puts("HALTED.\n");
+     cf0:	00000517          	auipc	a0,0x0
+     cf4:	0e050513          	addi	a0,a0,224 # dd0 <trap_report+0x164>
+     cf8:	00000097          	auipc	ra,0x0
+     cfc:	cb4080e7          	jalr	-844(ra) # 9ac <uart_puts>
+        __asm__ volatile("wfi");
+     d00:	10500073          	wfi
+     d04:	10500073          	wfi
+    for (;;)
+     d08:	ff9ff06f          	j	d00 <trap_report+0x94>
+     d0c:	2020                	.insn	2, 0x2020
+     d0e:	494d                	.insn	2, 0x494d
+     d10:	54414d53          	.insn	4, 0x54414d53
+     d14:	40204843          	.insn	4, 0x40204843
+     d18:	7830                	.insn	2, 0x7830
+     d1a:	0000                	.insn	2, 0x
+     d1c:	0000                	.insn	2, 0x
+     d1e:	0000                	.insn	2, 0x
+     d20:	6520                	.insn	2, 0x6520
+     d22:	7078                	.insn	2, 0x7078
+     d24:	303d                	.insn	2, 0x303d
+     d26:	0078                	.insn	2, 0x0078
+     d28:	6720                	.insn	2, 0x6720
+     d2a:	303d746f          	jal	s0,d882c <_estack+0xb882c>
+     d2e:	0078                	.insn	2, 0x0078
+     d30:	2a0a                	.insn	2, 0x2a0a
+     d32:	2a2a                	.insn	2, 0x2a2a
+     d34:	5420                	.insn	2, 0x5420
+     d36:	4152                	.insn	2, 0x4152
+     d38:	2050                	.insn	2, 0x2050
+     d3a:	2a2a                	.insn	2, 0x2a2a
+     d3c:	202a                	.insn	2, 0x202a
+     d3e:	6d20                	.insn	2, 0x6d20
+     d40:	73756163          	bltu	a0,s7,1462 <__bss_end+0x2b6>
+     d44:	3d65                	.insn	2, 0x3d65
+     d46:	7830                	.insn	2, 0x7830
+     d48:	0000                	.insn	2, 0x
+     d4a:	0000                	.insn	2, 0x
+     d4c:	6d20                	.insn	2, 0x6d20
+     d4e:	7065                	.insn	2, 0x7065
+     d50:	78303d63          	.insn	4, 0x78303d63
+     d54:	0000                	.insn	2, 0x
+     d56:	0000                	.insn	2, 0x
+     d58:	6d20                	.insn	2, 0x6d20
+     d5a:	7674                	.insn	2, 0x7674
+     d5c:	6c61                	.insn	2, 0x6c61
+     d5e:	303d                	.insn	2, 0x303d
+     d60:	0078                	.insn	2, 0x0078
+     d62:	0000                	.insn	2, 0x
+     d64:	280a                	.insn	2, 0x280a
+     d66:	2061                	.insn	2, 0x2061
+     d68:	6f6c                	.insn	2, 0x6f6c
+     d6a:	6461                	.insn	2, 0x6461
+     d6c:	6f74732f          	.insn	4, 0x6f74732f
+     d70:	6572                	.insn	2, 0x6572
+     d72:	6120                	.insn	2, 0x6120
+     d74:	73656363          	bltu	a0,s6,149a <__bss_end+0x2ee>
+     d78:	61662073          	.insn	4, 0x61662073
+     d7c:	6c75                	.insn	2, 0x6c75
+     d7e:	2074                	.insn	2, 0x2074
+     d80:	6568                	.insn	2, 0x6568
+     d82:	6572                	.insn	2, 0x6572
+     d84:	7520                	.insn	2, 0x7520
+     d86:	6c617573          	.insn	4, 0x6c617573
+     d8a:	796c                	.insn	2, 0x796c
+     d8c:	6d20                	.insn	2, 0x6d20
+     d8e:	6165                	.insn	2, 0x6165
+     d90:	736e                	.insn	2, 0x736e
+     d92:	4420                	.insn	2, 0x4420
+     d94:	5244                	.insn	2, 0x5244
+     d96:	6920                	.insn	2, 0x6920
+     d98:	6f6e2073          	.insn	4, 0x6f6e2073
+     d9c:	2074                	.insn	2, 0x2074
+     d9e:	696c6163          	bltu	s8,s6,1420 <__bss_end+0x274>
+     da2:	7262                	.insn	2, 0x7262
+     da4:	7461                	.insn	2, 0x7461
+     da6:	6465                	.insn	2, 0x6465
+     da8:	6f20                	.insn	2, 0x6f20
+     daa:	2072                	.insn	2, 0x2072
+     dac:	6874                	.insn	2, 0x6874
+     dae:	2065                	.insn	2, 0x2065
+     db0:	6461                	.insn	2, 0x6461
+     db2:	7264                	.insn	2, 0x7264
+     db4:	7365                	.insn	2, 0x7365
+     db6:	61662073          	.insn	4, 0x61662073
+     dba:	6c75                	.insn	2, 0x6c75
+     dbc:	6574                	.insn	2, 0x6574
+     dbe:	2064                	.insn	2, 0x2064
+     dc0:	74206e6f          	jal	t3,7502 <__global_pointer$+0x5b5a>
+     dc4:	6568                	.insn	2, 0x6568
+     dc6:	6620                	.insn	2, 0x6620
+     dc8:	6261                	.insn	2, 0x6261
+     dca:	6972                	.insn	2, 0x6972
+     dcc:	000a2963          	.insn	4, 0x000a2963
+     dd0:	4148                	.insn	2, 0x4148
+     dd2:	544c                	.insn	2, 0x544c
+     dd4:	4445                	.insn	2, 0x4445
+     dd6:	0a2e                	.insn	2, 0x0a2e
+     dd8:	0000                	.insn	2, 0x
+     dda:	0000                	.insn	2, 0x
+     ddc:	2020                	.insn	2, 0x2020
+     dde:	2020                	.insn	2, 0x2020
+     de0:	3e2d                	.insn	2, 0x3e2d
+     de2:	6120                	.insn	2, 0x6120
+     de4:	6464                	.insn	2, 0x6464
+     de6:	6572                	.insn	2, 0x6572
+     de8:	74207373          	.insn	4, 0x74207373
+     dec:	7365                	.insn	2, 0x7365
+     dee:	2074                	.insn	2, 0x2074
+     df0:	4146                	.insn	2, 0x4146
+     df2:	4c49                	.insn	2, 0x4c49
+     df4:	4445                	.insn	2, 0x4445
+     df6:	202c                	.insn	2, 0x202c
+     df8:	7265                	.insn	2, 0x7265
+     dfa:	6f72                	.insn	2, 0x6f72
+     dfc:	7372                	.insn	2, 0x7372
+     dfe:	003d                	.insn	2, 0x003d
+     e00:	2020                	.insn	2, 0x2020
+     e02:	2020                	.insn	2, 0x2020
+     e04:	3e2d                	.insn	2, 0x3e2d
+     e06:	6120                	.insn	2, 0x6120
+     e08:	6464                	.insn	2, 0x6464
+     e0a:	6572                	.insn	2, 0x6572
+     e0c:	74207373          	.insn	4, 0x74207373
+     e10:	7365                	.insn	2, 0x7365
+     e12:	2074                	.insn	2, 0x2074
+     e14:	202c6b6f          	jal	s6,c7016 <_estack+0xa7016>
+     e18:	7265                	.insn	2, 0x7265
+     e1a:	6f72                	.insn	2, 0x6f72
+     e1c:	7372                	.insn	2, 0x7372
+     e1e:	003d                	.insn	2, 0x003d
+     e20:	2020                	.insn	2, 0x2020
+     e22:	2020                	.insn	2, 0x2020
+     e24:	3e2d                	.insn	2, 0x3e2d
+     e26:	6420                	.insn	2, 0x6420
+     e28:	7461                	.insn	2, 0x7461
+     e2a:	2d61                	.insn	2, 0x2d61
+     e2c:	7562                	.insn	2, 0x7562
+     e2e:	65742073          	.insn	4, 0x65742073
+     e32:	46207473          	.insn	4, 0x46207473
+     e36:	4941                	.insn	2, 0x4941
+     e38:	454c                	.insn	2, 0x454c
+     e3a:	2c44                	.insn	2, 0x2c44
+     e3c:	6520                	.insn	2, 0x6520
+     e3e:	7272                	.insn	2, 0x7272
+     e40:	3d73726f          	jal	tp,38a16 <_estack+0x18a16>
+     e44:	0000                	.insn	2, 0x
+     e46:	0000                	.insn	2, 0x
+     e48:	2020                	.insn	2, 0x2020
+     e4a:	2020                	.insn	2, 0x2020
+     e4c:	3e2d                	.insn	2, 0x3e2d
+     e4e:	6420                	.insn	2, 0x6420
+     e50:	7461                	.insn	2, 0x7461
+     e52:	2d61                	.insn	2, 0x2d61
+     e54:	7562                	.insn	2, 0x7562
+     e56:	65742073          	.insn	4, 0x65742073
+     e5a:	6f207473          	.insn	4, 0x6f207473
+     e5e:	65202c6b          	.insn	4, 0x65202c6b
+     e62:	7272                	.insn	2, 0x7272
+     e64:	3d73726f          	jal	tp,38a3a <_estack+0x18a3a>
+     e68:	0000                	.insn	2, 0x
+     e6a:	0000                	.insn	2, 0x
+     e6c:	2020                	.insn	2, 0x2020
+     e6e:	2020                	.insn	2, 0x2020
+     e70:	3e2d                	.insn	2, 0x3e2d
+     e72:	6420                	.insn	2, 0x6420
+     e74:	7665                	.insn	2, 0x7665
+     e76:	6369                	.insn	2, 0x6369
+     e78:	2065                	.insn	2, 0x2065
+     e7a:	6574                	.insn	2, 0x6574
+     e7c:	46207473          	.insn	4, 0x46207473
+     e80:	4941                	.insn	2, 0x4941
+     e82:	454c                	.insn	2, 0x454c
+     e84:	2c44                	.insn	2, 0x2c44
+     e86:	6520                	.insn	2, 0x6520
+     e88:	7272                	.insn	2, 0x7272
+     e8a:	3d73726f          	jal	tp,38a60 <_estack+0x18a60>
+     e8e:	0000                	.insn	2, 0x
+     e90:	2020                	.insn	2, 0x2020
+     e92:	2020                	.insn	2, 0x2020
+     e94:	3e2d                	.insn	2, 0x3e2d
+     e96:	6420                	.insn	2, 0x6420
+     e98:	7665                	.insn	2, 0x7665
+     e9a:	6369                	.insn	2, 0x6369
+     e9c:	2065                	.insn	2, 0x2065
+     e9e:	6574                	.insn	2, 0x6574
+     ea0:	6f207473          	.insn	4, 0x6f207473
+     ea4:	65202c6b          	.insn	4, 0x65202c6b
+     ea8:	7272                	.insn	2, 0x7272
+     eaa:	3d73726f          	jal	tp,38a80 <_estack+0x18a80>
+     eae:	0000                	.insn	2, 0x
+     eb0:	3d0a                	.insn	2, 0x3d0a
+     eb2:	3d3d                	.insn	2, 0x3d3d
+     eb4:	3d3d                	.insn	2, 0x3d3d
+     eb6:	3d3d                	.insn	2, 0x3d3d
+     eb8:	3d3d                	.insn	2, 0x3d3d
+     eba:	3d3d                	.insn	2, 0x3d3d
+     ebc:	3d3d                	.insn	2, 0x3d3d
+     ebe:	3d3d                	.insn	2, 0x3d3d
+     ec0:	3d3d                	.insn	2, 0x3d3d
+     ec2:	3d3d                	.insn	2, 0x3d3d
+     ec4:	3d3d                	.insn	2, 0x3d3d
+     ec6:	3d3d                	.insn	2, 0x3d3d
+     ec8:	3d3d                	.insn	2, 0x3d3d
+     eca:	3d3d                	.insn	2, 0x3d3d
+     ecc:	3d3d                	.insn	2, 0x3d3d
+     ece:	3d3d                	.insn	2, 0x3d3d
+     ed0:	3d3d                	.insn	2, 0x3d3d
+     ed2:	3d3d                	.insn	2, 0x3d3d
+     ed4:	3d3d                	.insn	2, 0x3d3d
+     ed6:	3d3d                	.insn	2, 0x3d3d
+     ed8:	3d3d                	.insn	2, 0x3d3d
+     eda:	3d3d                	.insn	2, 0x3d3d
+     edc:	3d3d                	.insn	2, 0x3d3d
+     ede:	0a3d                	.insn	2, 0x0a3d
+     ee0:	0000                	.insn	2, 0x
+     ee2:	0000                	.insn	2, 0x
+     ee4:	6e20                	.insn	2, 0x6e20
+     ee6:	6e61                	.insn	2, 0x6e61
+     ee8:	436f536f          	jal	t1,f631e <_estack+0xd631e>
+     eec:	4d20                	.insn	2, 0x4d20
+     eee:	6369                	.insn	2, 0x6369
+     ef0:	6f72                	.insn	2, 0x6f72
+     ef2:	6c42                	.insn	2, 0x6c42
+     ef4:	7a61                	.insn	2, 0x7a61
+     ef6:	2d65                	.insn	2, 0x2d65
+     ef8:	2056                	.insn	2, 0x2056
+     efa:	4420                	.insn	2, 0x4420
+     efc:	5244                	.insn	2, 0x5244
+     efe:	2034                	.insn	2, 0x2034
+     f00:	656d                	.insn	2, 0x656d
+     f02:	746d                	.insn	2, 0x746d
+     f04:	7365                	.insn	2, 0x7365
+     f06:	0a74                	.insn	2, 0x0a74
+     f08:	0000                	.insn	2, 0x
+     f0a:	0000                	.insn	2, 0x
+     f0c:	3d3d                	.insn	2, 0x3d3d
+     f0e:	3d3d                	.insn	2, 0x3d3d
+     f10:	3d3d                	.insn	2, 0x3d3d
+     f12:	3d3d                	.insn	2, 0x3d3d
+     f14:	3d3d                	.insn	2, 0x3d3d
+     f16:	3d3d                	.insn	2, 0x3d3d
+     f18:	3d3d                	.insn	2, 0x3d3d
+     f1a:	3d3d                	.insn	2, 0x3d3d
+     f1c:	3d3d                	.insn	2, 0x3d3d
+     f1e:	3d3d                	.insn	2, 0x3d3d
+     f20:	3d3d                	.insn	2, 0x3d3d
+     f22:	3d3d                	.insn	2, 0x3d3d
+     f24:	3d3d                	.insn	2, 0x3d3d
+     f26:	3d3d                	.insn	2, 0x3d3d
+     f28:	3d3d                	.insn	2, 0x3d3d
+     f2a:	3d3d                	.insn	2, 0x3d3d
+     f2c:	3d3d                	.insn	2, 0x3d3d
+     f2e:	3d3d                	.insn	2, 0x3d3d
+     f30:	3d3d                	.insn	2, 0x3d3d
+     f32:	3d3d                	.insn	2, 0x3d3d
+     f34:	3d3d                	.insn	2, 0x3d3d
+     f36:	3d3d                	.insn	2, 0x3d3d
+     f38:	3d3d                	.insn	2, 0x3d3d
+     f3a:	000a                	.insn	2, 0x000a
+     f3c:	4920                	.insn	2, 0x4920
+     f3e:	62204153          	.insn	4, 0x62204153
+     f42:	6975                	.insn	2, 0x6975
+     f44:	646c                	.insn	2, 0x646c
+     f46:	3a20                	.insn	2, 0x3a20
+     f48:	7220                	.insn	2, 0x7220
+     f4a:	3376                	.insn	2, 0x3376
+     f4c:	6932                	.insn	2, 0x6932
+     f4e:	206d                	.insn	2, 0x206d
+     f50:	6c69202f          	.insn	4, 0x6c69202f
+     f54:	3370                	.insn	2, 0x3370
+     f56:	2032                	.insn	2, 0x2032
+     f58:	656d202f          	.insn	4, 0x656d202f
+     f5c:	6164                	.insn	2, 0x6164
+     f5e:	796e                	.insn	2, 0x796e
+     f60:	2f20                	.insn	2, 0x2f20
+     f62:	6e20                	.insn	2, 0x6e20
+     f64:	65722d6f          	jal	s10,23dba <_estack+0x3dba>
+     f68:	616c                	.insn	2, 0x616c
+     f6a:	0a78                	.insn	2, 0x0a78
+     f6c:	0000                	.insn	2, 0x
+     f6e:	0000                	.insn	2, 0x
+     f70:	5520                	.insn	2, 0x5520
+     f72:	5241                	.insn	2, 0x5241
+     f74:	2054                	.insn	2, 0x2054
+     f76:	6162                	.insn	2, 0x6162
+     f78:	3a206573          	.insn	4, 0x3a206573
+     f7c:	3020                	.insn	2, 0x3020
+     f7e:	0078                	.insn	2, 0x0078
+     f80:	2020                	.insn	2, 0x2020
+     f82:	6d28                	.insn	2, 0x6d28
+     f84:	7375                	.insn	2, 0x7375
+     f86:	2074                	.insn	2, 0x2074
+     f88:	616d                	.insn	2, 0x616d
+     f8a:	6374                	.insn	2, 0x6374
+     f8c:	2068                	.insn	2, 0x2068
+     f8e:	626d                	.insn	2, 0x626d
+     f90:	5f76                	.insn	2, 0x5f76
+     f92:	2e636f73          	.insn	4, 0x2e636f73
+     f96:	6374                	.insn	2, 0x6374
+     f98:	206c                	.insn	2, 0x206c
+     f9a:	7361                	.insn	2, 0x7361
+     f9c:	6e676973          	.insn	4, 0x6e676973
+     fa0:	625f 5f64 6461      	.insn	6, 0x64615f64625f
+     fa6:	7264                	.insn	2, 0x7264
+     fa8:	7365                	.insn	2, 0x7365
+     faa:	000a2973          	.insn	4, 0x000a2973
+     fae:	0000                	.insn	2, 0x
+     fb0:	4420                	.insn	2, 0x4420
+     fb2:	5244                	.insn	2, 0x5244
+     fb4:	6220                	.insn	2, 0x6220
+     fb6:	7361                	.insn	2, 0x7361
+     fb8:	2065                	.insn	2, 0x2065
+     fba:	3a20                	.insn	2, 0x3a20
+     fbc:	3020                	.insn	2, 0x3020
+     fbe:	0078                	.insn	2, 0x0078
+     fc0:	2020                	.insn	2, 0x2020
+     fc2:	7061                	.insn	2, 0x7061
+     fc4:	7265                	.insn	2, 0x7265
+     fc6:	7574                	.insn	2, 0x7574
+     fc8:	6572                	.insn	2, 0x6572
+     fca:	3020                	.insn	2, 0x3020
+     fcc:	0078                	.insn	2, 0x0078
+     fce:	0000                	.insn	2, 0x
+     fd0:	2820                	.insn	2, 0x2820
+     fd2:	2032                	.insn	2, 0x2032
+     fd4:	29426947          	.insn	4, 0x29426947
+     fd8:	000a                	.insn	2, 0x000a
+     fda:	0000                	.insn	2, 0x
+     fdc:	4420                	.insn	2, 0x4420
+     fde:	632d                	.insn	2, 0x632d
+     fe0:	6361                	.insn	2, 0x6361
+     fe2:	6568                	.insn	2, 0x6568
+     fe4:	2020                	.insn	2, 0x2020
+     fe6:	3a20                	.insn	2, 0x3a20
+     fe8:	0020                	.insn	2, 0x0020
+     fea:	0000                	.insn	2, 0x
+     fec:	4220                	.insn	2, 0x4220
+     fee:	202c                	.insn	2, 0x202c
+     ff0:	6c66                	.insn	2, 0x6c66
+     ff2:	7375                	.insn	2, 0x7375
+     ff4:	2068                	.insn	2, 0x2068
+     ff6:	646e6977          	.insn	4, 0x646e6977
+     ffa:	0020776f          	jal	a4,7ffc <__global_pointer$+0x6654>
+     ffe:	0000                	.insn	2, 0x
+    1000:	4220                	.insn	2, 0x4220
+    1002:	2820                	.insn	2, 0x2820
+    1004:	6572                	.insn	2, 0x6572
+    1006:	6461                	.insn	2, 0x6461
+    1008:	742d                	.insn	2, 0x742d
+    100a:	7268                	.insn	2, 0x7268
+    100c:	7361                	.insn	2, 0x7361
+    100e:	2068                	.insn	2, 0x2068
+    1010:	7665                	.insn	2, 0x7665
+    1012:	6369                	.insn	2, 0x6369
+    1014:	6974                	.insn	2, 0x6974
+    1016:	203b6e6f          	jal	t3,b7a18 <_estack+0x97a18>
+    101a:	6f6e                	.insn	2, 0x6f6e
+    101c:	6320                	.insn	2, 0x6320
+    101e:	6361                	.insn	2, 0x6361
+    1020:	6568                	.insn	2, 0x6568
+    1022:	4320                	.insn	2, 0x4320
+    1024:	20735253          	.insn	4, 0x20735253
+    1028:	72206e6f          	jal	t3,774a <__global_pointer$+0x5da2>
+    102c:	3376                	.insn	2, 0x3376
+    102e:	6932                	.insn	2, 0x6932
+    1030:	296d                	.insn	2, 0x296d
+    1032:	000a                	.insn	2, 0x000a
+    1034:	2d2d                	.insn	2, 0x2d2d
+    1036:	2d2d                	.insn	2, 0x2d2d
+    1038:	2d2d                	.insn	2, 0x2d2d
+    103a:	2d2d                	.insn	2, 0x2d2d
+    103c:	2d2d                	.insn	2, 0x2d2d
+    103e:	2d2d                	.insn	2, 0x2d2d
+    1040:	2d2d                	.insn	2, 0x2d2d
+    1042:	2d2d                	.insn	2, 0x2d2d
+    1044:	2d2d                	.insn	2, 0x2d2d
+    1046:	2d2d                	.insn	2, 0x2d2d
+    1048:	2d2d                	.insn	2, 0x2d2d
+    104a:	2d2d                	.insn	2, 0x2d2d
+    104c:	2d2d                	.insn	2, 0x2d2d
+    104e:	2d2d                	.insn	2, 0x2d2d
+    1050:	2d2d                	.insn	2, 0x2d2d
+    1052:	2d2d                	.insn	2, 0x2d2d
+    1054:	2d2d                	.insn	2, 0x2d2d
+    1056:	2d2d                	.insn	2, 0x2d2d
+    1058:	2d2d                	.insn	2, 0x2d2d
+    105a:	2d2d                	.insn	2, 0x2d2d
+    105c:	2d2d                	.insn	2, 0x2d2d
+    105e:	2d2d                	.insn	2, 0x2d2d
+    1060:	2d2d                	.insn	2, 0x2d2d
+    1062:	000a                	.insn	2, 0x000a
+    1064:	205d315b          	.insn	4, 0x205d315b
+    1068:	6b6c6177          	.insn	4, 0x6b6c6177
+    106c:	6e69                	.insn	2, 0x6e69
+    106e:	6e6f2d67          	.insn	4, 0x6e6f2d67
+    1072:	7365                	.insn	2, 0x7365
+    1074:	4120                	.insn	2, 0x4120
+    1076:	4444                	.insn	2, 0x4444
+    1078:	4552                	.insn	2, 0x4552
+    107a:	74205353          	.insn	4, 0x74205353
+    107e:	7365                	.insn	2, 0x7365
+    1080:	2074                	.insn	2, 0x2074
+    1082:	7265766f          	jal	a2,587a8 <_estack+0x387a8>
+    1086:	6120                	.insn	2, 0x6120
+    1088:	6570                	.insn	2, 0x6570
+    108a:	7472                	.insn	2, 0x7472
+    108c:	7275                	.insn	2, 0x7275
+    108e:	2065                	.insn	2, 0x2065
+    1090:	2e2e                	.insn	2, 0x2e2e
+    1092:	202e                	.insn	2, 0x202e
+    1094:	000a                	.insn	2, 0x000a
+    1096:	0000                	.insn	2, 0x
+    1098:	205d325b          	.insn	4, 0x205d325b
+    109c:	4144                	.insn	2, 0x4144
+    109e:	4154                	.insn	2, 0x4154
+    10a0:	422d                	.insn	2, 0x422d
+    10a2:	5355                	.insn	2, 0x5355
+    10a4:	7420                	.insn	2, 0x7420
+    10a6:	7365                	.insn	2, 0x7365
+    10a8:	2074                	.insn	2, 0x2074
+    10aa:	3040                	.insn	2, 0x3040
+    10ac:	0078                	.insn	2, 0x0078
+    10ae:	0000                	.insn	2, 0x
+    10b0:	2820                	.insn	2, 0x2820
+    10b2:	6b6c6177          	.insn	4, 0x6b6c6177
+    10b6:	6e69                	.insn	2, 0x6e69
+    10b8:	73312067          	.insn	4, 0x73312067
+    10bc:	2c73302f          	.insn	4, 0x2c73302f
+    10c0:	3620                	.insn	2, 0x3620
+    10c2:	2034                	.insn	2, 0x2034
+    10c4:	6170                	.insn	2, 0x6170
+    10c6:	7474                	.insn	2, 0x7474
+    10c8:	7265                	.insn	2, 0x7265
+    10ca:	736e                	.insn	2, 0x736e
+    10cc:	2029                	.insn	2, 0x2029
+    10ce:	2e2e                	.insn	2, 0x2e2e
+    10d0:	202e                	.insn	2, 0x202e
+    10d2:	000a                	.insn	2, 0x000a
+    10d4:	205d335b          	.insn	4, 0x205d335b
+    10d8:	4544                	.insn	2, 0x4544
+    10da:	4956                	.insn	2, 0x4956
+    10dc:	74204543          	.insn	4, 0x74204543
+    10e0:	7365                	.insn	2, 0x7365
+    10e2:	2074                	.insn	2, 0x2074
+    10e4:	7830                	.insn	2, 0x7830
+    10e6:	0000                	.insn	2, 0x
+    10e8:	6220                	.insn	2, 0x6220
+    10ea:	7479                	.insn	2, 0x7479
+    10ec:	7365                	.insn	2, 0x7365
+    10ee:	4020                	.insn	2, 0x4020
+    10f0:	7830                	.insn	2, 0x7830
+    10f2:	0000                	.insn	2, 0x
+    10f4:	2820                	.insn	2, 0x2820
+    10f6:	6f78                	.insn	2, 0x6f78
+    10f8:	7372                	.insn	2, 0x7372
+    10fa:	6968                	.insn	2, 0x6968
+    10fc:	7466                	.insn	2, 0x7466
+    10fe:	7320                	.insn	2, 0x7320
+    1100:	6565                	.insn	2, 0x6565
+    1102:	2064                	.insn	2, 0x2064
+    1104:	7830                	.insn	2, 0x7830
+    1106:	0000                	.insn	2, 0x
+    1108:	6220                	.insn	2, 0x6220
+    110a:	7479                	.insn	2, 0x7479
+    110c:	7365                	.insn	2, 0x7365
+    110e:	7620                	.insn	2, 0x7620
+    1110:	7265                	.insn	2, 0x7265
+    1112:	6669                	.insn	2, 0x6669
+    1114:	6569                	.insn	2, 0x6569
+    1116:	2064                	.insn	2, 0x2064
+    1118:	203a                	.insn	2, 0x203a
+    111a:	0000                	.insn	2, 0x
+    111c:	2820                	.insn	2, 0x2820
+    111e:	6564                	.insn	2, 0x6564
+    1120:	6976                	.insn	2, 0x6976
+    1122:	642b6563          	bltu	s6,sp,176c <__bss_end+0x5c0>
+    1126:	7461                	.insn	2, 0x7461
+    1128:	2d61                	.insn	2, 0x2d61
+    112a:	7562                	.insn	2, 0x7562
+    112c:	61203b73          	.insn	4, 0x61203b73
+    1130:	6464                	.insn	2, 0x6464
+    1132:	6572                	.insn	2, 0x6572
+    1134:	74207373          	.insn	4, 0x74207373
+    1138:	7365                	.insn	2, 0x7365
+    113a:	2074                	.insn	2, 0x2074
+    113c:	69727473          	.insn	4, 0x69727473
+    1140:	6564                	.insn	2, 0x6564
+    1142:	68742073          	.insn	4, 0x68742073
+    1146:	2065                	.insn	2, 0x2065
+    1148:	7566                	.insn	2, 0x7566
+    114a:	6c6c                	.insn	2, 0x6c6c
+    114c:	6120                	.insn	2, 0x6120
+    114e:	6570                	.insn	2, 0x6570
+    1150:	7472                	.insn	2, 0x7472
+    1152:	7275                	.insn	2, 0x7275
+    1154:	2965                	.insn	2, 0x2965
+    1156:	000a                	.insn	2, 0x000a
+    1158:	7420                	.insn	2, 0x7420
+    115a:	6c61746f          	jal	s0,18820 <__global_pointer$+0x16e78>
+    115e:	6520                	.insn	2, 0x6520
+    1160:	7272                	.insn	2, 0x7272
+    1162:	2073726f          	jal	tp,38b68 <_estack+0x18b68>
+    1166:	2020                	.insn	2, 0x2020
+    1168:	203a                	.insn	2, 0x203a
+    116a:	0000                	.insn	2, 0x
+    116c:	2a0a                	.insn	2, 0x2a0a
+    116e:	2a2a                	.insn	2, 0x2a2a
+    1170:	202a                	.insn	2, 0x202a
+    1172:	5020                	.insn	2, 0x5020
+    1174:	5341                	.insn	2, 0x5341
+    1176:	2a202053          	.insn	4, 0x2a202053
+    117a:	2a2a                	.insn	2, 0x2a2a
+    117c:	0a2a                	.insn	2, 0x0a2a
+    117e:	0000                	.insn	2, 0x
+    1180:	230a                	.insn	2, 0x230a
+    1182:	20232323          	sw	sp,518(t1)
+    1186:	4620                	.insn	2, 0x4620
+    1188:	4941                	.insn	2, 0x4941
+    118a:	204c                	.insn	2, 0x204c
+    118c:	2320                	.insn	2, 0x2320
+    118e:	0a232323          	sw	sp,166(t1)
+	...
+
+00001194 <hd.0>:
+    1194:	33323130 37363534 42413938 46454443     0123456789ABCDEF
+    11a4:	00000000                                ....

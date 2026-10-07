@@ -1,0 +1,39 @@
+MPS3 shield-path failure signature -- VCS transcript
+virtual PHY : fpga/ethernet/mdio_phy_model/ (C_PHY_ADDR=1, ID 0x0007C0F1)
+VCS         : vcs script version : T-2022.06
+
+Command: <repo>/tests/shield_path/./simv -l run.log
+Chronologic VCS simulator copyright 1991-2022
+Contains Synopsys proprietary information.
+Compiler version T-2022.06-SP2_Full64; Runtime version T-2022.06-SP2_Full64;  Jul 10 16:01 2026
+
+SHIELD_PATH: PHASE 1 -- healthy shield (both directions pass)
+SHIELD_PATH:   ok    PHYID1 (reg 2)                   0x0007
+SHIELD_PATH:   ok    PHYID2 (reg 3)                   0xc0f1
+SHIELD_PATH:   ok    ANAR   (reg 4)                   0x01e1
+
+SHIELD_PATH: PHASE 2 -- inbound (PHY->FPGA) channel DEAD
+SHIELD_PATH:   board finding #3: BMSR reads 0xFFFF at every PHY address
+SHIELD_PATH:   ok    BMSR = 0xFFFF at all 32 PHY addresses
+SHIELD_PATH:   board finding #2: a WRITE still reaches the PHY
+SHIELD_PATH:   ok    ANAR readback while dead         0xffff
+
+SHIELD_PATH: PHASE 3 -- inbound restored; did the P2 write land?
+SHIELD_PATH:   ok    ANAR after restore               0x0181
+SHIELD_PATH:   ok    PHYID1 again                     0x0007
+
+SHIELD_PATH: PHASE 4 -- negative control: outbound ALSO dead, write must not land
+SHIELD_PATH:   ok    ANAR unchanged by dead write     0x0181
+
+SHIELD_PATH: errors=0  VERDICT=PASS
+SHIELD_PATH: a dead inbound channel is indistinguishable from a dead PHY,
+SHIELD_PATH: a wrong PHY address, or a dead MAC -- by reads alone.
+SHIELD_PATH: Only write-then-verify separates them. On the real board the
+SHIELD_PATH: 'verify' is the PHY's LEDs responding to a BMCR write (finding #2).
+
+$finish called from file "<repo>/tests/shield_path/shield_path_tb.sv", line 231.
+$finish at simulation time           1080955000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 1080955000 ps
+CPU Time:      0.410 seconds;       Data structure size:   0.0Mb
+Fri Jul 10 16:01:40 2026

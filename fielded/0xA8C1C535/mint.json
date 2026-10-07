@@ -1,0 +1,197 @@
+{
+  "artefacts": [
+    {
+      "bytes": null,
+      "md5": "94853a897c56fa673cb1f70bbcaae2f0",
+      "mtime": null,
+      "name": "config_rm_greybox.bit"
+    },
+    {
+      "bytes": null,
+      "md5": "87ebf1f2a83f80082d750ab2cafeed0a",
+      "mtime": null,
+      "name": "config_rm_greybox.mmi"
+    },
+    {
+      "bytes": null,
+      "md5": "54be381288f53bd19665218f8f3ae143",
+      "mtime": null,
+      "name": "overlay_inputs.txt"
+    },
+    {
+      "bytes": null,
+      "md5": "f53d515f79a33f444032095d84e711a7",
+      "mtime": null,
+      "name": "shell_harness.xsa"
+    },
+    {
+      "bytes": null,
+      "md5": "2c86f1548ee46157dae1abadaf0fcdff",
+      "mtime": null,
+      "name": "static_id.txt"
+    }
+  ],
+  "build_dir": "fpga/dfx/build_mint/prod",
+  "dcps": [
+    {
+      "bytes": null,
+      "md5": "33327b59505a1f12f68bb7ca4246224c",
+      "mtime": null,
+      "name": "config_rm_greybox_routed.dcp"
+    },
+    {
+      "bytes": null,
+      "md5": "4e7434a3c45acb12abf8b648506cf2e6",
+      "mtime": null,
+      "name": "shell_static_synth.dcp"
+    },
+    {
+      "bytes": null,
+      "md5": "088fac2695d8407cee4607be9f305a28",
+      "mtime": null,
+      "name": "static_routed_locked.dcp"
+    }
+  ],
+  "firmware": {
+    "elf": {
+      "reason": "the firmware ELF is not among the preserved artefacts; what was flashed is the greybox base bitstream with the ELF already baked in by updatemem",
+      "value": null
+    },
+    "flags": {
+      "reason": "not recorded in the build dir: the mint's firmware flag set was never written beside its artefacts. docs/FIELDED_SHELL.md's `fielded_fw_flags` row is the authority for what the fielded image was built with",
+      "value": null
+    },
+    "product": {
+      "reason": "the firmware flag set is not recorded here, so PRODUCT cannot be derived from it",
+      "value": null
+    }
+  },
+  "generated_at": "2026-09-10T12:34:23Z",
+  "generated_by": "fpga/dfx/tools/mint_record.py",
+  "integrity": {
+    "note": "computed from the two tracked text files against this directory's own MANIFEST.md5; the binaries are gitignored and are checked by verify_fielded.sh",
+    "overlay_inputs_txt": "md5-matches-MANIFEST",
+    "static_id_txt": "md5-matches-MANIFEST"
+  },
+  "overlay_inputs": [
+    {
+      "clearing": "config_rm_greybox_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_greybox_pblock_rp_dut_partial.bin",
+      "rm_id": "0x00000000",
+      "rm_key": "rm_greybox",
+      "rm_name": "greybox"
+    },
+    {
+      "clearing": "config_rm_regdemo_a_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_regdemo_a_pblock_rp_dut_partial.bin",
+      "rm_id": "0x010000A1",
+      "rm_key": "rm_regdemo_a",
+      "rm_name": "regdemo_a"
+    },
+    {
+      "clearing": "config_rm_regdemo_b_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_regdemo_b_pblock_rp_dut_partial.bin",
+      "rm_id": "0x010000B2",
+      "rm_key": "rm_regdemo_b",
+      "rm_name": "regdemo_b"
+    },
+    {
+      "clearing": "config_rm_led_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_led_pblock_rp_dut_partial.bin",
+      "rm_id": "0x0100001E",
+      "rm_key": "rm_led",
+      "rm_name": "led"
+    },
+    {
+      "clearing": "config_rm_uart_echo_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_uart_echo_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000004",
+      "rm_key": "rm_uart_echo",
+      "rm_name": "uart_echo"
+    },
+    {
+      "clearing": "config_rm_nanosoc_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_nanosoc_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000001",
+      "rm_key": "rm_nanosoc",
+      "rm_name": "nanosoc"
+    },
+    {
+      "clearing": "config_rm_eth_ss_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_eth_ss_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000002",
+      "rm_key": "rm_eth_ss",
+      "rm_name": "eth_ss"
+    },
+    {
+      "clearing": "config_rm_nanosoc_multicore_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_nanosoc_multicore_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000003",
+      "rm_key": "rm_nanosoc_multicore",
+      "rm_name": "nanosoc_multicore"
+    },
+    {
+      "clearing": "config_rm_socscope_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_socscope_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000006",
+      "rm_key": "rm_socscope",
+      "rm_name": "socscope"
+    },
+    {
+      "clearing": "config_rm_nanosoc_upy_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_nanosoc_upy_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000005",
+      "rm_key": "rm_nanosoc_upy",
+      "rm_name": "nanosoc_upy"
+    }
+  ],
+  "record_kind": "reconstructed",
+  "reused_dcps": {
+    "reason": null,
+    "value": {
+      "checkpoints": [],
+      "from": null,
+      "note": "four external-source RM checkpoints (nanosoc, eth_ss, nanosoc_multicore, socscope) were verified byte-identical to an earlier build tree's and were copied in, not rebuilt. The tree is named in this directory's README; it is gitignored, so it is not named here as a path"
+    }
+  },
+  "rm_set": [
+    "rm_greybox",
+    "rm_regdemo_a",
+    "rm_regdemo_b",
+    "rm_led",
+    "rm_uart_echo",
+    "rm_nanosoc",
+    "rm_eth_ss",
+    "rm_nanosoc_multicore",
+    "rm_socscope",
+    "rm_nanosoc_upy"
+  ],
+  "schema": "mps3-mint-record",
+  "schema_version": "1.0",
+  "shell_proj": {
+    "reason": "not recorded: the two shell-project artefacts in MANIFEST.md5 (shell_static_synth.dcp, shell_harness.xsa) name no project dir, and the mint predates this record",
+    "value": null
+  },
+  "sources": {
+    "nanosoc_m0_soc": {
+      "reason": "the external-source RM checkpoints were REUSED, not rebuilt, in this mint; the only record of which trees produced them is the rm_*_synth/synth.log of the tree they were copied from, which is gitignored scratch (see this directory's README, \"Provenance\")",
+      "value": null
+    },
+    "repo": {
+      "reason": "the mint predates mint.json: the repo revision it was built from was never written down. docs/FIELDED_SHELL.md's `fielded_by` records the commit that FIELDED this shell, which is a different fact",
+      "value": null
+    },
+    "socscope": {
+      "reason": "no synth.log for rm_socscope exists in any tree -- its checkpoint was copied in from a build dir that kept none. Nothing on disk records the SoCScope revision it was synthesised from; the provenance chain runs out here",
+      "value": null
+    }
+  },
+  "static_id": "0xA8C1C535",
+  "timestamps": {},
+  "tools": {
+    "vivado": {
+      "reason": "the Vivado version was not recorded beside the artefacts; the overlay manifests generated from this mint carry it",
+      "value": null
+    }
+  }
+}

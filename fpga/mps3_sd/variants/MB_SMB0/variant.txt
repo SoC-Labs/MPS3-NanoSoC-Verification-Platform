@@ -1,0 +1,14 @@
+; MB_SMB0 -- the MOTHERBOARD-level SMB sideband flag, in the SD-root config.txt.
+;
+; NOT the same key as ETH_SMB0, and the difference matters. `FPGA_SMB` appears
+; TWICE in an MPS3 bundle:
+;   * config.txt (SD root)                -- the MCC's motherboard config: is
+;                                            the MCC_SMC<->FPGA_SMB sideband
+;                                            available at all;
+;   * MB/HBI0309<rev>/Nanosoc/nanosoc.txt -- the FPGA application note's own
+;                                            peripheral-support flag.
+; The audit item "ETH_SMB=0 in config.txt" is ambiguous between them, so both
+; are shipped as separate variants and the run record says which one was on the
+; card. Run them one at a time; a campaign that flips both has moved two
+; variables and can only ever produce a story.
+DESCRIPTION: MCC motherboard SMB sideband disabled at the SD root (config.txt)

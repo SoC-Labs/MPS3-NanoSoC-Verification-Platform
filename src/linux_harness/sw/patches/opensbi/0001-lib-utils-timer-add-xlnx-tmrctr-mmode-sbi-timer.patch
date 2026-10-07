@@ -1,0 +1,363 @@
+Subject: [PATCH] lib: utils/timer: add Xilinx AXI Timer M-mode SBI timer (plan-C MBV workaround)
+
+M-mode clock event on the AXI timer via AXI INTC + MEIP, injecting
+mip.STIP for the S-mode kernel; opt-in via DT property soclabs,sbi-timer.
+See the driver header for the full rationale (broken Sstc/SEIP silicon).
+
+diff -Naur a/lib/utils/timer/Kconfig b/lib/utils/timer/Kconfig
+--- a/lib/utils/timer/Kconfig	2024-12-24 09:58:18.000000000 +0000
++++ b/lib/utils/timer/Kconfig	2026-07-16 21:25:44.111110819 +0100
+@@ -19,6 +19,10 @@
+ 	select TIMER_PLMT
+ 	default n
+ 
++config FDT_TIMER_XLNX_TMRCTR
++	bool "Xilinx AXI Timer FDT driver (M-mode timer via AXI INTC/MEIP)"
++	default n
++
+ endif
+ 
+ config TIMER_MTIMER
+diff -Naur a/lib/utils/timer/fdt_timer_xlnx_tmrctr.c b/lib/utils/timer/fdt_timer_xlnx_tmrctr.c
+--- a/lib/utils/timer/fdt_timer_xlnx_tmrctr.c	1970-01-01 01:00:00.000000000 +0100
++++ b/lib/utils/timer/fdt_timer_xlnx_tmrctr.c	2026-07-16 21:25:27.911713177 +0100
+@@ -0,0 +1,319 @@
++/*
++ * SPDX-License-Identifier: BSD-2-Clause
++ *
++ * fdt_timer_xlnx_tmrctr.c - M-mode SBI timer built from a Xilinx AXI
++ * Timer (axi_timer / "xlnx,xps-timer-1.00.a") whose interrupt reaches
++ * the hart through a Xilinx AXI INTC ("xlnx,xps-intc-1.00.a") on the
++ * machine external interrupt line (MEIP).
++ *
++ * Purpose ("plan-C" workaround, SoCLabs linux_soc on AMD MicroBlaze-V):
++ * on the target silicon the S-mode timer interrupt path is unusable
++ * (Sstc stimecmp never raises a deliverable STIP, and SEIP delivery to
++ * S-mode has never been observed working). The single MBV external
++ * interrupt pin pends BOTH mip.MEIP and sip.SEIP (UG1629), and M-mode
++ * delivery via MEIP is the remaining plausible path. This driver:
++ *
++ *   1. owns the AXI timer channel 0 as the SBI one-shot clock event:
++ *      sbi_set_timer() -> timer_event_start() programs a down-count,
++ *      the terminal count raises intc input N -> MEIP -> M-mode trap;
++ *   2. in the M-mode external-interrupt handler: clears the timer
++ *      interrupt at the source, acks the intc IAR, and injects the
++ *      S-mode timer interrupt by setting mip.STIP (sbi_timer_process());
++ *   3. runs the AXI timer channel 1 as a free-running up-counter and
++ *      exposes it as timer_value so that OpenSBI has a timebase (and
++ *      can emulate the TIME CSR) even when rdtime is not usable, e.g.
++ *      on qemu -M amd-microblaze-v-generic where the time CSR traps;
++ *   4. force-disables the SSTC hart extension, because OpenSBI 1.6
++ *      detects Sstc by trap-probing CSR_STIMECMP - which SUCCEEDS on
++ *      the broken silicon (the CSR is accepted; only the interrupt is
++ *      dead) - and sbi_timer_event_start() would otherwise keep using
++ *      stimecmp instead of this device.
++ *
++ * The driver binds only when the timer node carries the OPT-IN property
++ * "soclabs,sbi-timer". Without it this driver is inert, so the same
++ * fw_jump image boots unchanged with a device tree that trusts Sstc.
++ * The node itself stays fully standard for the kernel (which has no
++ * driver for it: mainline has no AXI-timer clocksource, and the pwm
++ * driver binds "xlnx,axi-timer-2.0" only when #pwm-cells is present).
++ *
++ * Cooperation with the S-mode kernel sharing the same AXI INTC:
++ *   - the Linux xilinx_intc driver writes IER=0 at probe, which would
++ *     mask our input; timer_event_start() therefore re-asserts our bit
++ *     through the atomic SIE register on every programming (the kernel
++ *     programs the first SBI timer event only after that probe, and
++ *     SIE/CIE are set/clear-bit registers, so neither side can clobber
++ *     the other's enables);
++ *   - if some other (S-mode-owned) intc input ever pends while MEIE is
++ *     on, it would livelock the M-mode trap (we may not ack another
++ *     owner's interrupt, and S-mode cannot run to ack it while MEIP is
++ *     pending). Those bits are masked via CIE with a one-time warning.
++ *     In the intended configuration this cannot happen: the workaround
++ *     device tree runs the uartlite in polled mode with its interrupt
++ *     output disabled, and nothing else drives the intc.
++ *
++ * Single-hart by design (MicroBlaze-V linux_soc has exactly one hart).
++ */
++
++#include <libfdt.h>
++#include <sbi/riscv_asm.h>
++#include <sbi/riscv_encoding.h>
++#include <sbi/riscv_io.h>
++#include <sbi/sbi_console.h>
++#include <sbi/sbi_error.h>
++#include <sbi/sbi_hart.h>
++#include <sbi/sbi_irqchip.h>
++#include <sbi/sbi_scratch.h>
++#include <sbi/sbi_timer.h>
++#include <sbi_utils/fdt/fdt_helper.h>
++#include <sbi_utils/timer/fdt_timer.h>
++
++/* AXI Timer (PG079) register map: two channels, 0x10 apart */
++#define XLNX_TMR_TCSR0		0x00
++#define XLNX_TMR_TLR0		0x04
++#define XLNX_TMR_TCR0		0x08
++#define XLNX_TMR_TCSR1		0x10
++#define XLNX_TMR_TLR1		0x14
++#define XLNX_TMR_TCR1		0x18
++
++#define XLNX_TMR_CSR_MDT	(1 << 0)	/* mode: 1=capture */
++#define XLNX_TMR_CSR_UDT	(1 << 1)	/* 1 = count down */
++#define XLNX_TMR_CSR_GENT	(1 << 2)
++#define XLNX_TMR_CSR_CAPT	(1 << 3)
++#define XLNX_TMR_CSR_ARHT	(1 << 4)	/* 1 = auto reload */
++#define XLNX_TMR_CSR_LOAD	(1 << 5)	/* load counter from TLR */
++#define XLNX_TMR_CSR_ENIT	(1 << 6)	/* interrupt enable */
++#define XLNX_TMR_CSR_ENT	(1 << 7)	/* counter enable */
++#define XLNX_TMR_CSR_TINT	(1 << 8)	/* interrupt, W1C */
++
++/* AXI INTC (PG099) register map */
++#define XLNX_INTC_ISR		0x00
++#define XLNX_INTC_IPR		0x04	/* pending = ISR & IER */
++#define XLNX_INTC_IER		0x08
++#define XLNX_INTC_IAR		0x0c	/* W1C ack */
++#define XLNX_INTC_SIE		0x10	/* atomic set of IER bits */
++#define XLNX_INTC_CIE		0x14	/* atomic clear of IER bits */
++#define XLNX_INTC_MER		0x1c
++#define XLNX_INTC_MER_ME	(1 << 0)
++#define XLNX_INTC_MER_HIE	(1 << 1)
++
++static struct {
++	volatile char *tmr;		/* AXI timer base */
++	volatile char *intc;		/* AXI intc base */
++	u32 irq_mask;			/* our bit in the intc registers */
++	/* software 64-bit extension of the 32-bit channel-1 up-counter */
++	u32 val_last;
++	u32 val_high;
++	bool foreign_warned;
++} tmrctr;
++
++static u64 tmrctr_value(void)
++{
++	u32 lo = readl(tmrctr.tmr + XLNX_TMR_TCR1);
++
++	/*
++	 * 32-bit counter @ timer_freq (42.9 s wrap at 100 MHz), widened in
++	 * software. Monotonic as long as this is called at least once per
++	 * wrap period - guaranteed while the kernel programs tick events.
++	 * Only used when the hart has no usable time CSR (e.g. QEMU's MBV
++	 * model); on silicon Zicntr rdtime is detected first and wins.
++	 */
++	if (lo < tmrctr.val_last)
++		tmrctr.val_high++;
++	tmrctr.val_last = lo;
++
++	return ((u64)tmrctr.val_high << 32) | lo;
++}
++
++static void tmrctr_event_stop(void)
++{
++	/* stop channel 0 (ENT=0) and clear any latched interrupt (W1C) */
++	writel(XLNX_TMR_CSR_TINT, tmrctr.tmr + XLNX_TMR_TCSR0);
++}
++
++static void tmrctr_event_start(u64 next_event)
++{
++	u64 now = sbi_timer_value();
++	u64 delta = (next_event > now) ? next_event - now : 1;
++
++	/* one 32-bit down-count is the furthest we can see; if the
++	 * requested event is beyond it, fire early and let the caller
++	 * re-arm (the kernel re-programs on every timer interrupt). */
++	if (delta > 0xfffffffeULL)
++		delta = 0xfffffffeULL;
++
++	/* stop + ack stale, load, then run: one-shot down-count */
++	writel(XLNX_TMR_CSR_TINT, tmrctr.tmr + XLNX_TMR_TCSR0);
++	writel((u32)delta, tmrctr.tmr + XLNX_TMR_TLR0);
++	writel(XLNX_TMR_CSR_UDT | XLNX_TMR_CSR_LOAD,
++	       tmrctr.tmr + XLNX_TMR_TCSR0);
++	writel(XLNX_TMR_CSR_UDT | XLNX_TMR_CSR_ENIT | XLNX_TMR_CSR_ENT,
++	       tmrctr.tmr + XLNX_TMR_TCSR0);
++
++	/*
++	 * Re-assert our intc input enable (atomic set: touches only our
++	 * bit). The Linux xilinx_intc driver writes IER=0 once at probe;
++	 * every event programmed after that re-opens the gate here.
++	 */
++	writel(tmrctr.irq_mask, tmrctr.intc + XLNX_INTC_SIE);
++	csr_set(CSR_MIE, MIP_MEIP);
++}
++
++static int tmrctr_irq_handle(void)
++{
++	u32 pend = readl(tmrctr.intc + XLNX_INTC_IPR);
++
++	if (pend & tmrctr.irq_mask) {
++		/* order matters with a level-typed input: silence the
++		 * source first, then ack the intc latch */
++		writel(XLNX_TMR_CSR_TINT, tmrctr.tmr + XLNX_TMR_TCSR0);
++		writel(tmrctr.irq_mask, tmrctr.intc + XLNX_INTC_IAR);
++		/* SSTC is force-disabled below, so this injects mip.STIP:
++		 * the delegated S-mode timer interrupt for the kernel */
++		sbi_timer_process();
++		pend &= ~tmrctr.irq_mask;
++	}
++
++	if (pend) {
++		/*
++		 * Enabled+pending intc inputs that are not ours. We must
++		 * not ack another owner's interrupt, but leaving it
++		 * pending would retrap forever (S-mode can never run to
++		 * ack it while MEIP is pending). Mask via atomic CIE.
++		 */
++		writel(pend, tmrctr.intc + XLNX_INTC_CIE);
++		if (!tmrctr.foreign_warned) {
++			tmrctr.foreign_warned = true;
++			sbi_printf("%s: masked foreign intc irqs 0x%x "
++				   "(S-mode owners must poll)\n",
++				   __func__, pend);
++		}
++	}
++
++	return 0;
++}
++
++static struct sbi_timer_device tmrctr_timer = {
++	.name = "xlnx-tmrctr",
++	.timer_value = tmrctr_value,
++	.timer_event_start = tmrctr_event_start,
++	.timer_event_stop = tmrctr_event_stop,
++};
++
++static struct sbi_irqchip_device tmrctr_irqchip = {
++	.irq_handle = tmrctr_irq_handle,
++};
++
++static int fdt_tmrctr_cold_init(const void *fdt, int nodeoff,
++				const struct fdt_match *match)
++{
++	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
++	const fdt32_t *val;
++	u64 addr, size;
++	unsigned long freq = 0;
++	u32 hwirq;
++	int rc, len, intc_off;
++
++	/* opt-in gate: without the property this driver must be inert */
++	if (!fdt_getprop(fdt, nodeoff, "soclabs,sbi-timer", &len))
++		return 0;
++
++	/* one instance only */
++	if (tmrctr.tmr)
++		return 0;
++
++	rc = fdt_get_node_addr_size(fdt, nodeoff, 0, &addr, &size);
++	if (rc)
++		return rc;
++	tmrctr.tmr = (volatile char *)(unsigned long)addr;
++
++	val = fdt_getprop(fdt, nodeoff, "clock-frequency", &len);
++	if (val && len >= (int)sizeof(fdt32_t))
++		freq = fdt32_to_cpu(*val);
++	else
++		fdt_parse_timebase_frequency(fdt, &freq);
++	if (!freq)
++		return SBI_EINVAL;
++
++	/* which intc input are we? first cell of "interrupts" */
++	val = fdt_getprop(fdt, nodeoff, "interrupts", &len);
++	if (!val || len < (int)sizeof(fdt32_t))
++		return SBI_EINVAL;
++	hwirq = fdt32_to_cpu(val[0]);
++	if (hwirq > 31)
++		return SBI_EINVAL;
++	tmrctr.irq_mask = 1U << hwirq;
++
++	/* locate the AXI INTC through the explicit interrupt-parent */
++	val = fdt_getprop(fdt, nodeoff, "interrupt-parent", &len);
++	if (!val || len < (int)sizeof(fdt32_t))
++		return SBI_EINVAL;
++	intc_off = fdt_node_offset_by_phandle(fdt, fdt32_to_cpu(*val));
++	if (intc_off < 0)
++		return SBI_EINVAL;
++	rc = fdt_get_node_addr_size(fdt, intc_off, 0, &addr, &size);
++	if (rc)
++		return rc;
++	tmrctr.intc = (volatile char *)(unsigned long)addr;
++
++	/* channel 0: stopped, interrupt cleared, until the first event */
++	writel(XLNX_TMR_CSR_TINT, tmrctr.tmr + XLNX_TMR_TCSR0);
++
++	/* channel 1: free-running up-counter for timer_value */
++	writel(0, tmrctr.tmr + XLNX_TMR_TLR1);
++	writel(XLNX_TMR_CSR_LOAD, tmrctr.tmr + XLNX_TMR_TCSR1);
++	writel(XLNX_TMR_CSR_ARHT | XLNX_TMR_CSR_ENT,
++	       tmrctr.tmr + XLNX_TMR_TCSR1);
++	tmrctr.val_last = readl(tmrctr.tmr + XLNX_TMR_TCR1);
++	tmrctr.val_high = 0;
++
++	/* intc: ack stale, enable our input, master+hardware enable */
++	writel(tmrctr.irq_mask, tmrctr.intc + XLNX_INTC_IAR);
++	writel(tmrctr.irq_mask, tmrctr.intc + XLNX_INTC_SIE);
++	writel(XLNX_INTC_MER_ME | XLNX_INTC_MER_HIE,
++	       tmrctr.intc + XLNX_INTC_MER);
++
++	/*
++	 * Force the legacy SBI-timer contract. OpenSBI detected Sstc by
++	 * trap-probing CSR_STIMECMP, which succeeds even where the STIP
++	 * interrupt is dead (the exact silicon defect this driver works
++	 * around). With the extension cleared, sbi_timer_event_start()
++	 * uses this device and sbi_timer_process() injects mip.STIP.
++	 * Also drop menvcfg.STCE so S-mode cannot touch stimecmp at all.
++	 */
++	sbi_hart_update_extension(scratch, SBI_HART_EXT_SSTC, false);
++	if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_12) {
++#if __riscv_xlen == 32
++		csr_clear(CSR_MENVCFGH, (u32)(ENVCFG_STCE >> 32));
++#else
++		csr_clear(CSR_MENVCFG, ENVCFG_STCE);
++#endif
++	}
++
++	/*
++	 * Take MEIP in M-mode. sbi_irqchip_init() already ran (it comes
++	 * before sbi_timer_init() in the cold-boot sequence), so enable
++	 * MEIE ourselves in addition to registering the handler.
++	 */
++	sbi_irqchip_add_device(&tmrctr_irqchip);
++	csr_set(CSR_MIE, MIP_MEIP);
++
++	tmrctr_timer.timer_freq = freq;
++	sbi_timer_set_device(&tmrctr_timer);
++
++	sbi_printf("timer: xlnx-tmrctr @ %luHz, intc input %u "
++		   "(MEIP -> mip.STIP; Sstc force-disabled by DT opt-in)\n",
++		   freq, hwirq);
++
++	return 0;
++}
++
++static const struct fdt_match timer_xlnx_tmrctr_match[] = {
++	{ .compatible = "xlnx,xps-timer-1.00.a" },
++	{ .compatible = "xlnx,axi-timer-2.0" },
++	{},
++};
++
++const struct fdt_driver fdt_timer_xlnx_tmrctr = {
++	.match_table = timer_xlnx_tmrctr_match,
++	.init = fdt_tmrctr_cold_init,
++};
+diff -Naur a/lib/utils/timer/objects.mk b/lib/utils/timer/objects.mk
+--- a/lib/utils/timer/objects.mk	2024-12-24 09:58:18.000000000 +0000
++++ b/lib/utils/timer/objects.mk	2026-07-16 21:25:44.112110905 +0100
+@@ -18,3 +18,6 @@
+ 
+ carray-fdt_timer_drivers-$(CONFIG_FDT_TIMER_PLMT) += fdt_timer_plmt
+ libsbiutils-objs-$(CONFIG_FDT_TIMER_PLMT) += timer/fdt_timer_plmt.o
++
++carray-fdt_timer_drivers-$(CONFIG_FDT_TIMER_XLNX_TMRCTR) += fdt_timer_xlnx_tmrctr
++libsbiutils-objs-$(CONFIG_FDT_TIMER_XLNX_TMRCTR) += timer/fdt_timer_xlnx_tmrctr.o
+diff -Naur a/platform/generic/configs/defconfig b/platform/generic/configs/defconfig
+--- a/platform/generic/configs/defconfig	2024-12-24 09:58:18.000000000 +0000
++++ b/platform/generic/configs/defconfig	2026-07-16 21:25:44.112110905 +0100
+@@ -53,5 +53,6 @@
+ CONFIG_FDT_TIMER=y
+ CONFIG_FDT_TIMER_MTIMER=y
+ CONFIG_FDT_TIMER_PLMT=y
++CONFIG_FDT_TIMER_XLNX_TMRCTR=y
+ CONFIG_FDT_MPXY=y
+ CONFIG_FDT_MPXY_RPMI_MBOX=y

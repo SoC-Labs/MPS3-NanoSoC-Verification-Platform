@@ -1,0 +1,70 @@
+RMII bit/nibble-order CONFORMANCE — closes the RMII half of I22
+================================================================
+Date : 2026-07-09
+Tool : VCS T-2022.06-SP2  (source set_env.sh)
+Run  : make -C tests/rmii_conformance          (real + both negative controls)
+
+WHY THIS IS A CONFORMANCE CHECK, NOT A SELF-CHECK
+-------------------------------------------------
+tests/rmii_phy_if/ only proves self-consistency: both ends are our own RTL
+(test_mii_tx_path_reaches_rmii_rx_pins + mirror). It cannot detect a bit order
+that is internally consistent but wrong on the wire.
+
+This bench faces our shell-side virtual PHY against an INDEPENDENT
+implementation of the same RMII<->MII conversion, the one the real DUT uses:
+
+  DUT#1  fpga/ethernet/rmii_phy_if/rmii_phy_if.sv            (shell PHY side)
+  DUT#2  ethernet-mac-ahb/amba_wb_bridges/src/rtl/rmii_to_mii.v (DUT MAC side,
+         instantiated by fpga/rp/eth_ss/rp_eth_ss_wrapper.sv)
+
+PROVENANCE CHECK (this is what gives the result its force):
+  * rmii_to_mii.v's header: "Rewritten based on the proven rmii_phy_if module
+    by WangXuan95 (github.com/WangXuan95/FPGA-RMII-SMII)".
+  * OUR rmii_phy_if.sv carries NO upstream attribution, and its README states
+    "Reuse outcome: hand-rolled, not LiteEth" — the planned LiteEth reuse never
+    happened; it was written from scratch.
+  * The two share ZERO identifiers (e.g. `dibit` appears 19x in ours, 0x in
+    theirs).
+  => Different ancestry. Agreement is evidence, not tautology.
+  (The name collision is a coincidence: WangXuan95's upstream module is also
+   called rmii_phy_if. Do not mistake that for shared lineage.)
+
+STIMULUS
+--------
+A realistic frame with an ASYMMETRIC, non-palindromic payload so that any
+di-bit reversal or nibble swap is detectable:
+  preamble 55 x7, SFD d5, DA 00 11 22 33 44 55, SA aa bb cc dd ee ff,
+  type 08 00, payload 01 23 45 67 89 ab cd ef        (30 bytes)
+
+RESULT
+------
+  Direction A: MAC(rmii_to_mii TX) -> RMII -> PHY(rmii_phy_if RX)  byte-exact (0 errors)
+  Direction B: PHY(rmii_phy_if TX) -> RMII -> MAC(rmii_to_mii RX)  byte-exact (0 errors)
+
+  CONFORMANCE: PASS  (byte-exact both directions, cross-implementation)
+
+NEGATIVE CONTROLS (a bench that cannot fail is worthless)
+---------------------------------------------------------
+Both directions are independently falsifiable:
+
+  control                        Dir A errors   Dir B errors
+  ---------------------------    ------------   ------------
+  none (real RTL)                     0              0
+  TX di-bits swapped (neg 1)          0             18
+  RX nibble halves swapped (neg 2)   18              0
+
+Neg 1 mutates `phy_rmii_rxd_q <= mii_txd_i[3:2]` (high di-bit first).
+Neg 2 mutates `rx_nib_q <= {rx_lo_q, phy_rmii_txd_q}` (halves swapped).
+Neither control touches the third-party RTL.
+
+WHAT THIS PROVES — AND WHAT IT DOES NOT
+----------------------------------------
+PROVES: our virtual PHY and the DUT's MAC-side bridge agree byte-for-byte on
+di-bit order, nibble assembly order, and LSB-first-within-byte, in both
+directions. Two independently written implementations of IEEE 802.3 Annex 22B
+di-bit ordering concur. The RMII half of I22 does not need board time.
+
+DOES NOT PROVE: pad-level electrical/timing behaviour, CRS_DV de-multiplexing
+(our v1 uses a plain frame envelope), preamble insert/strip (neither block does
+it; the MAC owns it), 10 Mb/s di-bit repetition, or RX_ER. Those remain as the
+rmii_phy_if README's documented v1 simplifications.

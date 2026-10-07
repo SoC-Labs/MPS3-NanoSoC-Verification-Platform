@@ -1,0 +1,101 @@
+#-- nanosoc_iice_debug.prj -- Synplify Premier project carrying an Identify
+#-- (IICE) implementation for the MPS3 nanoSoC DFX reconfigurable module.
+#--
+#-- =====================================================================
+#-- STATUS: NEVER EXECUTED. Not by Synplify, not by identify_debugger, and
+#-- never against hardware. Authored 2026-07-29 from
+#-- docs/planning/IDENTIFY_IICE_DFX_PLAN.md and the one working reference in
+#-- reach: HAPS-work/HAPS-SX/examples/hello_ident/build/hello_ident.prj.
+#-- Treat every value below as a proposal to be checked on first run.
+#-- =====================================================================
+#--
+#-- WHICH COPY IS AUTHORITATIVE
+#--   The SYNTHESIS project lives with the RM build (fpga/rp/nanosoc_iice/**,
+#--   owned elsewhere). The debugger must open the project the *build* produced,
+#--   because it refuses to load without `rev_1_identify/syn.db` and reads the
+#--   IICE description from that implementation's `identify.db`
+#--   (hello_ident/README.md, "Files the debugger needs"). This file is the
+#--   host-side reference of what that project must contain, and the fallback to
+#--   copy into a build directory if you are debugging a bitstream whose project
+#--   was not archived. Point debug_session.tcl at whichever copy is real:
+#--       IICE_PRJ=/path/to/build/nanosoc_iice_debug.prj \
+#--           identify_debugger_shell host/identify/debug_session.tcl
+#--
+#-- WHY AN "identify"-TYPE IMPLEMENTATION
+#--   `impl -add rev_1_identify -type identify` + `set_option
+#--   -identify_debug_mode 1` is what makes plain batch synthesis run
+#--   identify_db_generator + identify_compile and weave the IICE in. The
+#--   instrumentation is read from rev_1_identify/identify.idc, seeded from the
+#--   generated .idc (tests/identify_iice/build/<IICE>.idc). Do NOT script
+#--   identify_instrumentor_shell -- in 2022.09 `project open` silently kills
+#--   script execution (hello_ident/README.md:28-30).
+
+#-- ------------------------------------------------------------------------
+#-- RTL. Placeholder only: the real source set is 226 files / 77,637 lines,
+#-- flattened from $SOCLABS_NANOSOC_SOC_DIR/pynq/filelist.tcl plus 5 repo-side
+#-- files (IDENTIFY_IICE_DFX_PLAN.md §5 Phase 3). The RM build owns that list
+#-- and must emit it here in dependency order, PACKAGES BEFORE CONSUMERS.
+#-- ------------------------------------------------------------------------
+# add_file -verilog -vlog_std sysv "<generated file list goes here>"
+add_file -fpga_constraint "./nanosoc_iice.fdc"
+
+#-- ------------------------------------------------------------------------
+#-- Implementation: Identify type. The name `rev_1_identify` is not cosmetic --
+#-- it is the directory the debugger looks in.
+#-- ------------------------------------------------------------------------
+impl -add rev_1_identify -type identify
+
+#-- ------------------------------------------------------------------------
+#-- Device. XCKU115-FLVB1760, speed grade -1, commercial: the MPS3's part is
+#-- `xcku115-flvb1760-1-c` (fpga/monolithic/README.md:16, 272/272 PACKAGE_PINs
+#-- validated against the real package DB). Part + package + grade are all
+#-- CONFIRMED present in
+#--   /eda/.../SFPGA_2022.09-SP2/fpga/lib/parts/xilinx_parts.txt:1687-1702
+#-- which lists XCKU115 with package FLVB1760 and grade -1-c.
+#--
+#-- -technology IS UNVERIFIED. xilinx_parts.txt groups XCKU115 under
+#-- `target Kintex-UltraScale-FPGAs`, and xilinx_families.info (which maps
+#-- targets to mapper families) is encrypted, so the token Synplify expects
+#-- could not be read. `KINTEXU` is the conventional Synplify spelling; if
+#-- synthesis rejects it, try the target name verbatim:
+#--     set_option -technology "Kintex-UltraScale-FPGAs"
+#-- and record which one worked. (hello_ident used the board alias
+#-- HAPS-SX-VU19P-32G, which is no guide for a bare part.)
+#-- ------------------------------------------------------------------------
+set_option -technology KINTEXU
+set_option -part XCKU115
+set_option -package FLVB1760
+set_option -speed_grade -1
+set_option -part_companion ""
+
+#-- ------------------------------------------------------------------------
+#-- Compilation / mapping.
+#--
+#--   -top_module        The RM boundary module. If plan risk R1 turns out to be
+#--                      real -- `device jtagport soft` adding the four
+#--                      identify_jtag_* ports to the top -- the Synplify top
+#--                      becomes a thin shim that carries exactly the 35 contract
+#--                      ports (docs/contracts/partition-pins.md) and ties
+#--                      identify_jtag_{tck,tms,tdi,tdo} to swd_{clk,dio_o,
+#--                      dio_oe,dio_i}. Change this line, not the contract.
+#--   -disable_io_insertion 1
+#--                      MANDATORY here, for two independent reasons: the
+#--                      OOC/EDIF handoff into the DFX flow needs pad-less
+#--                      ports, and `jtagport soft` needs its four ports to stay
+#--                      pad-less too (plan §2).
+#--   -identify_debug_mode 1
+#--                      Turns on the Identify jobs in batch.
+#-- ------------------------------------------------------------------------
+set_option -top_module "rp_nanosoc_wrapper"
+set_option -disable_io_insertion 1
+set_option -identify_debug_mode 1
+set_option -write_vif 1
+
+#-- ------------------------------------------------------------------------
+#-- Result. The EDIF basename MUST be exactly <top_module>.edf or Vivado's
+#-- link_design fails with "[Project 1-68] No files found to match top module"
+#-- (plan §7, first trap). Case sensitive.
+#-- ------------------------------------------------------------------------
+project -result_file "./rev_1_identify/rp_nanosoc_wrapper.edf"
+
+impl -active "rev_1_identify"

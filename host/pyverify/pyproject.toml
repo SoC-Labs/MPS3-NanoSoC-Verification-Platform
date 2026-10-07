@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mps3-pyverify"
+version = "0.1.0"
+description = "Host-side verification library for the MPS3 nanoSoC platform: shell control-channel client, overlay-manifest handling, swap orchestration, console scraping, and debug-tool launch wrappers."
+requires-python = ">=3.10"
+dependencies = []
+# A4 scope note: no hard runtime deps. `client.py`/`console.py` use only
+# stdlib `socket`/`json`; `overlay.py`/`swap.py` use stdlib `json`/`zlib`.
+# `debug.py` shells out to `openocd`/Vivado (subprocess, stdlib). Keeping
+# this dependency-free means pyverify can be vendored onto the Pi-5 tender
+# or a Jupyter host with nothing beyond the stdlib + Python >=3.10.
+
+[project.optional-dependencies]
+# Only needed to run host/pyverify/tests/.
+dev = ["pytest>=7"]
+# Pulled in only by the tender integration (host/tender/), not by pyverify
+# itself — see host/tender/README.md. Listed here for discoverability.
+tender = ["pydantic>=2", "pyserial>=3.5"]
+
+[tool.setuptools.packages.find]
+include = ["pyverify*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

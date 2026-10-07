@@ -1,0 +1,190 @@
+#!/bin/sh
+#
+# S41mps3net — bring up eth0 as THIS board: its MAC, DHCP first, its static
+# address as a PERMANENT secondary, so a board is always findable on a direct
+# cable or the hub's board link AND picks up a lease where there is a server
+# (IMAGE_CONTRACT §5; config /etc/mps3/net.conf).
+#
+# THE BOARD IDENTITY (lane IDENT, 2026-09-28) owns the MAC, the static address
+# and the hostname: /run/mps3/identity, resolved by S13mps3identity from the
+# /persist override, the stage0 bake and the image default. Before it, every
+# board came up as 192.168.10.101 / 02:00:00:4D:50:53. With no identity file
+# (a legacy image, the resolver missing) the image defaults apply.
+#
+#   0. hostname; the identity's MAC on eth0 BEFORE the link comes up (a MAC
+#      change on a running interface is refused by some drivers, and a MAC set
+#      after link up has already been seen: IPv6 link-local, the DHCP client id,
+#      the switch's and the peers' ARP caches)
+#   1. link up, bounded wait for carrier
+#   2. udhcpc: a bounded foreground attempt, then it keeps trying in the
+#      background. Its script (/usr/share/mps3/udhcpc.script) manages ONLY
+#      the lease address — Busybox's default script does `ifconfig eth0
+#      0.0.0.0` / replaces the primary, which would take .101 with it.
+#   3. the static address after the DHCP attempt, so a same-subnet lease stays
+#      primary. Duplicate-address detection first (arping -D); if something
+#      answers, it is skipped and logged, never stolen. promote_secondaries=1 so
+#      a lease change can never drop it.
+#
+# State for identify/health: /run/mps3/net.state
+#   dhcp=0|1 lease=<ip|none> static101=added|in-use|off|failed static=<a.b.c.d/nn>
+#   mac=<aa:bb:..> mac_set=ok|unchanged|failed|none settled=1
+#   (static101 keeps its name: it is the static address's state, whatever it is)
+#
+# IN THE BACKGROUND (2026-09-24): `start` returns at once and steps 1-3 run in a
+# subshell, so the rest of rcS -- and then init's respawn of mps3-harnessd, whose
+# FIRST WDOG KICK must land inside stage0's 42.9 s -- no longer waits for carrier
+# (<= 6 s), the DHCP attempt (<= 4 s with no server) or .101's DAD (2 s). The
+# subshell appends settled=1 when steps 1-3 are done; S99mps3health waits for it
+# before it judges the network, so the stage0 CONFIRM still needs a real IPv4.
+
+# The paths are overridable ONLY so the host test can run this script against a
+# fake sysfs (harnessd/tests/test_identity_tool.py); init passes none of them.
+NETCONF=${MPS3_T_NETCONF:-/etc/mps3/net.conf}
+RUN=${MPS3_T_RUN:-/run/mps3}
+IDENTITY=${MPS3_T_IDENTITY:-$RUN/identity}
+SYSNET=${MPS3_T_SYSNET:-/sys/class/net}
+CMDLINE=${MPS3_T_CMDLINE:-/proc/cmdline}
+IF=eth0
+
+MPS3_NET_MODE=auto
+MPS3_NET_STATIC=192.168.10.101/24
+MPS3_DHCP_TRIES=2
+MPS3_DHCP_TIMEOUT=2
+MPS3_NET_CARRIER_WAIT=6
+MPS3_HOSTNAME=
+MPS3_MAC=
+[ -r "$NETCONF" ] && . "$NETCONF"
+# The board identity wins over net.conf for the static address and the hostname
+# (identity owns the IP; `mps3-identity set ip=...` changes it).
+if [ -r "$IDENTITY" ]; then
+    . "$IDENTITY"
+    [ -n "$MPS3_IP" ] && MPS3_NET_STATIC=$MPS3_IP
+fi
+
+log() { echo "mps3net: $*"; }
+
+cmdline_arg() {
+    for a in $(cat "$CMDLINE" 2>/dev/null); do
+        case "$a" in "$1="*) echo "${a#*=}"; return 0 ;; esac
+    done
+    return 1
+}
+
+state() {   # key value — rewrite one key of $RUN/net.state
+    touch "$RUN/net.state"
+    sed -i "/^$1=/d" "$RUN/net.state"
+    echo "$1=$2" >> "$RUN/net.state"
+}
+
+add_static() {
+    [ -n "$MPS3_NET_STATIC" ] || { state static101 off; return; }
+    state static "$MPS3_NET_STATIC"
+    ip4=${MPS3_NET_STATIC%/*}
+    if ip -4 addr show dev $IF | grep -q " $ip4/"; then
+        state static101 added
+        return
+    fi
+    # DAD: -D = duplicate address detection (sender 0.0.0.0); rc 0 = nobody
+    # answered. A reply means another host owns it — do not take it.
+    if arping -D -q -I $IF -c 2 -w 2 "$ip4" >/dev/null 2>&1; then
+        if ip addr add "$MPS3_NET_STATIC" dev $IF 2>/dev/null; then
+            state static101 added
+            log "$MPS3_NET_STATIC added (permanent secondary)"
+        else
+            state static101 failed
+            log "could not add $MPS3_NET_STATIC"
+        fi
+    else
+        state static101 in-use
+        log "$ip4 in use by another host (arping -D answered) — not added"
+    fi
+}
+
+# The identity's MAC on eth0, with the link DOWN (step 0 of the header). Only
+# ever called before `ip link set $IF up`: the host test proves the order, with a
+# negative control that moves this call after the link-up and must fail.
+set_mac() {
+    if [ -z "$MPS3_MAC" ]; then
+        state mac_set none
+        state mac "$(cat $SYSNET/$IF/address 2>/dev/null)"
+        return
+    fi
+    cur=$(cat $SYSNET/$IF/address 2>/dev/null)
+    if [ "$cur" = "$MPS3_MAC" ]; then
+        state mac_set unchanged
+    else
+        ip link set dev $IF down 2>/dev/null
+        if ip link set dev $IF address "$MPS3_MAC"; then
+            state mac_set ok
+            log "$IF MAC $MPS3_MAC (was ${cur:-?})"
+        else
+            state mac_set failed
+            log "could not set $IF MAC $MPS3_MAC -- keeping ${cur:-?}"
+        fi
+    fi
+    state mac "$(cat $SYSNET/$IF/address 2>/dev/null)"
+}
+
+start() {
+    mkdir -p "$RUN"
+    : > "$RUN/net.state"
+    [ -d $SYSNET/$IF ] || { log "no $IF, skipping"; state settled 1; exit 0; }
+    mode=$(cmdline_arg mps3.net) || mode=$MPS3_NET_MODE
+    # July image compatibility: mps3_net=dhcp on the cmdline
+    grep -q 'mps3_net=dhcp' "$CMDLINE" 2>/dev/null && mode=dhcp
+    [ -n "$MPS3_HOSTNAME" ] && hostname "$MPS3_HOSTNAME"
+    [ -r "$IDENTITY" ] || log "no $IDENTITY: image defaults (MAC as the kernel set it)"
+
+    sysctl -qw net.ipv4.conf.$IF.promote_secondaries=1 2>/dev/null \
+        || echo 1 > /proc/sys/net/ipv4/conf/$IF/promote_secondaries
+    set_mac
+    ip link set $IF up
+    i=0
+    while [ "$(cat $SYSNET/$IF/carrier 2>/dev/null)" != 1 ] && \
+          [ $i -lt $((MPS3_NET_CARRIER_WAIT * 5)) ]; do
+        sleep 0.2; i=$((i + 1))
+    done
+    [ "$(cat $SYSNET/$IF/carrier 2>/dev/null)" = 1 ] || log "no carrier after ${MPS3_NET_CARRIER_WAIT}s"
+
+    state dhcp 0
+    state lease none
+    if [ "$mode" != static ]; then
+        # -b: after the foreground tries, fork and keep trying; -S: syslog.
+        udhcpc -i $IF -s /usr/share/mps3/udhcpc.script -p /var/run/udhcpc.$IF.pid \
+               -t "$MPS3_DHCP_TRIES" -T "$MPS3_DHCP_TIMEOUT" -A 20 -b -S \
+               -x "hostname:$(hostname)" >/dev/null 2>&1
+        if grep -q '^dhcp=1' "$RUN/net.state"; then
+            log "DHCP lease $(sed -n 's/^lease=//p' "$RUN/net.state")"
+        else
+            log "no DHCP lease yet (udhcpc keeps trying in the background)"
+        fi
+    fi
+    if [ "$mode" != dhcp ]; then
+        add_static
+    else
+        state static101 off
+    fi
+
+    # Promiscuous mode: a default-OFF knob (/etc/mps3/promisc; rationale there).
+    MPS3_PROMISC=0
+    [ -r /etc/mps3/promisc ] && . /etc/mps3/promisc
+    if [ "$MPS3_PROMISC" = "1" ]; then
+        log "$IF promiscuous ON (/etc/mps3/promisc)"
+        ip link set $IF promisc on
+    fi
+    state settled 1
+}
+
+stop() {
+    [ -f /var/run/udhcpc.$IF.pid ] && kill "$(cat /var/run/udhcpc.$IF.pid)" 2>/dev/null
+    ip addr flush dev $IF 2>/dev/null
+    ip link set $IF down 2>/dev/null
+}
+
+case "$1" in
+    start) ( start ) < /dev/null & ;;      # background: see the header
+    stop) stop ;;
+    restart) stop; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
+exit 0

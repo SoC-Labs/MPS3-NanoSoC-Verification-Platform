@@ -1,0 +1,357 @@
+# fpga/shell/boundary.yaml — THE RP ⇄ static-shell partition boundary.
+#
+# This file is the single declaration of the 47-port / 148-bit partition
+# boundary. Every other statement of that boundary in this tree is a GENERATED
+# VIEW of this file, written by tools/gen_boundary.py:
+#
+#   fpga/shell/rp_dut_stub.sv                 port list + inert tie-offs
+#   fpga/shell/generated/rp_wrapper_skeleton.sv   skeleton for a NEW RM
+#   fpga/dfx/pin_check.py                     the table the gate diffs against
+#   docs/contracts/partition-pins.md          the per-group signal tables
+#
+# WHY: before this file the boundary was asserted independently in ~13 places
+# (every RM wrapper, the stub, pin_check, the contract doc, the XDC). Only the
+# RM-wrapper side was gated — pin_check parsed the MARKDOWN and diffed wrappers
+# against it. The SHELL side (rp_dut_stub.sv) was gated by nothing, and it had
+# already drifted once: src/linux_harness/impl/rp_dut_stub.sv still carries the
+# pre-re-mint SWD group (swd_clk/swd_dio_o/swd_dio_oe/swd_dio_i).
+#
+# THIS BOUNDARY IS THE 2026-10 (ILA) MINT'S: 0x72BB0A36, fielded 2026-09-24
+# (docs/FIELDED_SHELL.md is the authority for what the board runs). The previous
+# shell 0x3F1A560F was routed against the 35-port / 136-bit boundary WITHOUT the
+# `dbgbscan` group; adding that group (12 BSCAN legs from debug_bridge_0's
+# m0_bscan master, so an RM can carry its own debug hub + ILAs reachable over
+# XVC — spec D4 reversed, docs/planning/ILA_MINT_PLAN_2026-09-23.md decision 1)
+# is the widening the 2026-10 mint paid for. Overlays built against this file
+# link into 0x72BB0A36; none keyed to 0x3F1A560F does. Changing a single direction, width
+# or signal name here re-keys `static_id` and invalidates EVERY overlay in
+# fpga/dfx/prod/: widen only together with a full re-mint. See
+# docs/contracts/partition-pins.md for the prose contract (CDC rule, the QSPI
+# non-CDC exception, the IOB packing note, the BSCAN group).
+#
+# FIELD REFERENCE
+#   dir     direction FROM THE SHELL'S VIEW.  O = shell drives (RP input)
+#                                             I = shell receives (RP output)
+#   width   an integer, or the symbolic `NGPIO` (a build parameter, v0 = 16)
+#   clamp   the DFX decoupler safe-idle value held while decouple=1.
+#           `none` = not a decoupler member. ONLY the RP-drive (`I`) legs are
+#           decoupler members; shell→RP legs route straight through because
+#           rp_resetn holds the RP in reset for the whole swap.
+#           Cross-checked against fpga/shell/bd/shell_bd.tcl's
+#           dfx_decoupler_0 CONFIG.ALL_PARAMS (20 INTFs, IDs 0-19;
+#           dbg_bscan_tdo is ID 19).
+#   note    the one-line description that lands in partition-pins.md
+#   stub_note   optional inline comment on the rp_dut_stub.sv tie-off
+#   (group) stub_port_comment / stub_comment  prose the STUB carries above a
+#           group's ports / tie-offs; stub-only, never in the RM skeleton
+#   stub_ascii_from  optional: names a TOP-LEVEL key whose ASCII value the
+#                    stub drives instead of `clamp` (rm_id only)
+
+version: "v0.2"
+
+# NGPIO is a build parameter; v0 freezes it at 16. pin_check.py rejects any RM
+# wrapper declaring a different value.
+ngpio: 16
+
+# rp_dut_stub.sv's rm_id readback. The coordinator/host reads this off the
+# rm_id pin (overlay-manifest.md rm_id verify) and can tell the harness is
+# carrying the inert stub RP, not a real RM checkpoint. The generator encodes
+# the ASCII to 32'h53_54_55_42.
+stub_rm_id_ascii: "STUB"
+
+# Derived assertions. gen_boundary.py RECOMPUTES both from `groups` below and
+# raises GenError on a mismatch, so a signal added or a width edited without
+# updating these numbers is a hard failure, not a silent widening.
+totals:
+  ports: 47
+  bits: 148
+
+# The direction convention pin_check.py enforces: an RM sits on the other side
+# of the boundary, so every direction inverts.
+rm_direction_map:
+  O: "input"
+  I: "output"
+
+groups:
+
+  - id: clkrst
+    domain_column: true
+    signals:
+      - name: "dut_clk"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        domain: "dut"
+        note: "DRP-reconfigurable DUT system clock"
+      - name: "dut_resetn"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        domain: "dut"
+        note: "reset #1 — DUT system reset (host register)"
+      - name: "rp_resetn"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        domain: "dut"
+        note: "reset #2 — reconfig reset, held through swap"
+      - name: "dbg_resetn"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        domain: "dut"
+        note: "reset #3 — debug/SRST from OpenOCD path"
+
+  - id: jtag
+    signals:
+      - name: "jtag_tck"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "TCK → DUT dap_swclktck"
+      - name: "jtag_tms"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "TMS → DUT dap_swditms"
+      - name: "jtag_tdi"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "TDI → DUT dap_tdi"
+      - name: "jtag_tdo"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: "TDO ← DUT dap_tdo"
+
+  - id: dbgbscan
+    stub_port_comment: |
+      RM debug — BSCAN to an RM debug hub (partition-pins.md, 2026-10 ILA
+      mint). Inert stub: no hub, the legs are ignored and TDO reads 0.
+    signals:
+      - name: "dbg_bscan_bscanid_en"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN id-enable from debug_bridge_0 m0_bscan (ILA-over-XVC)"
+      - name: "dbg_bscan_capture"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN CAPTURE from debug_bridge_0 m0_bscan"
+      - name: "dbg_bscan_drck"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN DRCK (gated TCK) from debug_bridge_0 m0_bscan; 80 ns clock in RM OOC XDCs"
+      - name: "dbg_bscan_reset"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN RESET (TAP test-logic-reset) from debug_bridge_0 m0_bscan"
+      - name: "dbg_bscan_runtest"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN RUNTEST from debug_bridge_0 m0_bscan"
+      - name: "dbg_bscan_sel"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN SEL (user instruction selected) from debug_bridge_0 m0_bscan"
+      - name: "dbg_bscan_shift"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN SHIFT from debug_bridge_0 m0_bscan"
+      - name: "dbg_bscan_tck"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN TCK from debug_bridge_0 m0_bscan, 80 ns (12.5 MHz) off a static BUFGCE"
+      - name: "dbg_bscan_tdi"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN TDI from debug_bridge_0 m0_bscan"
+      - name: "dbg_bscan_tms"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN TMS from debug_bridge_0 m0_bscan"
+      - name: "dbg_bscan_update"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "BSCAN UPDATE from debug_bridge_0 m0_bscan"
+      - name: "dbg_bscan_tdo"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: "BSCAN TDO from the RM's debug_bridge (mode 1); 0 when no RM hub"
+
+  - id: eth
+    signals:
+      - name: "phy_rmii_ref_clk"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "50 MHz REF_CLK sourced by shell (DUT = ref-in)"
+      - name: "phy_rmii_crs_dv"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "carrier-sense / RX-valid to DUT MAC"
+      - name: "phy_rmii_rxd"
+        dir: "O"
+        width: 2
+        clamp: "none"
+        note: "RX data to DUT MAC"
+      - name: "phy_rmii_txd"
+        dir: "I"
+        width: 2
+        clamp: 0
+        note: "TX data from DUT MAC"
+      - name: "phy_rmii_tx_en"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: "TX enable from DUT MAC"
+      - name: "mdc"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: "MDIO clock from DUT (DUT = MDIO master)"
+      - name: "mdio_o"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: "MDIO out from DUT"
+      - name: "mdio_oe"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: "MDIO output-enable from DUT"
+        stub_note: "MDIO tri-stated (input mode)"
+      - name: "mdio_i"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: "MDIO in to DUT (virtual-PHY register model reply)"
+
+  - id: uart
+    signals:
+      - name: "uart_tx_tdata"
+        dir: "I"
+        width: 8
+        clamp: 0
+        note: "DUT → host console bytes"
+      - name: "uart_tx_tvalid"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: ""
+      - name: "uart_tx_tready"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: ""
+      - name: "uart_rx_tdata"
+        dir: "O"
+        width: 8
+        clamp: "none"
+        note: "host → DUT console bytes"
+      - name: "uart_rx_tvalid"
+        dir: "O"
+        width: 1
+        clamp: "none"
+        note: ""
+      - name: "uart_rx_tready"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: ""
+      - name: "swo"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: "Cortex-M SWO/ITM single-wire trace (relayed like UART)"
+
+  - id: status
+    stub_comment: |
+      rm_id readback = ASCII "STUB" (0x53_54_55_42): the coordinator/host reads
+      this off the rm_id pin (overlay-manifest.md rm_id verify) and can tell the
+      harness is carrying the inert stub RP, not a real RM checkpoint.
+    signals:
+      - name: "rm_id"
+        dir: "I"
+        width: 32
+        clamp: 0
+        note: "RM identity register — read back for RM-load verify"
+        # the stub drives the ASCII tag from the top-level `stub_rm_id_ascii`
+        # instead of the decoupler clamp (0); see gen_boundary.py::_stub_tieoffs
+        stub_ascii_from: "stub_rm_id_ascii"
+      - name: "dut_lockup"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: "core lockup indicator (telemetry/watchdog)"
+      - name: "irq_out"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: "spare DUT IRQ/event to shell (optional)"
+
+  - id: gpio
+    signals:
+      - name: "dut_gpio_o"
+        dir: "I"
+        width: "NGPIO"
+        clamp: 0
+        note: "DUT drive value → shell → board pad"
+      - name: "dut_gpio_oe"
+        dir: "I"
+        width: "NGPIO"
+        clamp: 0
+        note: "DUT output-enable (per-bit tristate)"
+        stub_note: "all DUT GPIO as inputs (high-Z)"
+      - name: "dut_gpio_i"
+        dir: "O"
+        width: "NGPIO"
+        clamp: "none"
+        note: "board pad → shell → DUT sample"
+
+  - id: qspi
+    stub_port_comment: |
+      Flash / QSPI XiP boundary (partition-pins.md v0.2). Inert stub: flash
+      driven to safe idle (deselected), io_i accepted.
+    stub_comment: |
+      QSPI flash pads: safe idle (deselected, clock low, lanes tri-stated).
+    signals:
+      - name: "qspi_sclk"
+        dir: "I"
+        width: 1
+        clamp: 0
+        note: "SPI clock, RP → shell → SCLK pad (AT25)"
+      - name: "qspi_csn"
+        dir: "I"
+        width: 1
+        clamp: 1
+        note: "chip-select (active-low), RP → shell → nCS pad (AT24)"
+        stub_note: "active-low CS deasserted"
+      - name: "qspi_io_o"
+        dir: "I"
+        width: 4
+        clamp: 0
+        note: "IO0-3 drive value, RP → shell → data pads"
+      - name: "qspi_io_oe"
+        dir: "I"
+        width: 4
+        clamp: 0
+        note: "IO0-3 per-lane output-enable, RP → shell (SoC `QSPI_IO_e`)"
+      - name: "qspi_io_i"
+        dir: "O"
+        width: 4
+        clamp: "none"
+        note: "IO0-3 sampled at the pad, shell → RP (SoC `QSPI_IO_i`)"

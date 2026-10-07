@@ -1,0 +1,14 @@
+# src/linux_soc/package/ = the board bring-up bundle: large, fully
+# regenerable BINARIES (bitstream, XSA, kernel Image, OpenSBI, rootfs, DTB).
+# These are byte copies of build artifacts (hw/build + linux/artifacts) and
+# total ~320 MB — they must NEVER bloat the git diff. Restage them with the
+# package step in the runbook.
+#
+# Track ONLY the small, commit-worthy evidence: MANIFEST.txt (artifact list +
+# sha256 + provenance) and this .gitignore. That is enough to audit exactly
+# what a bring-up used and to re-fetch/rebuild it.
+*
+!.gitignore
+!MANIFEST.txt
+!MANIFEST.sha256
+!README*

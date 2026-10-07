@@ -1,0 +1,368 @@
+/dts-v1/;
+
+/*
+ * Device tree for the SoCLabs "linux_soc" -- AMD MicroBlaze V (RV32, Sv32)
+ * on the Arm MPS3 (Kintex UltraScale KU115).
+ *
+ * HAND-AUTHORED, deliberately. The vendor flow (xsct + Xilinx/device-tree-xlnx)
+ * CANNOT generate this: device-tree-xlnx master (239f035, 2026-03-05) contains zero
+ * references to riscv/mbv, and its CPU handler declares
+ *     cpu/data/cpu.mdd:21:  OPTION supported_peripherals = (microblaze);
+ * i.e. classic MicroBlaze only. There is no MicroBlaze V DT generator, and PetaLinux
+ * (which would otherwise supply one) is not installed.
+ *
+ * EVERY node below is cross-checked against the REAL hardware handoff
+ * hw/build/linux_soc.xsa (linux_soc.hwh), not just against hw/ADDRESS_MAP.md.
+ * Where the two could disagree the XSA wins; in this design they agree on every
+ * address. See README.md sec.5 for the full XSA-vs-DTS audit table.
+ *
+ * Build with ./mk_dtb.sh -- do NOT call dtc by hand. The script stamps
+ * linux,initrd-end from the real rootfs size and asserts the load-address
+ * invariants below (a kernel that grows into the DTB is a silent boot hang).
+ *
+ * STATUS 2026-07-16: BOOTED ON SILICON with this DTB -- OpenSBI v1.6 -> kernel
+ * 6.18 -> BusyBox rc completes on the uartlite console, but NO LOGIN PROMPT:
+ * busybox getty needs a working CLOCKEVENT before its first prompt byte
+ * (alarm(5)+tcdrain, usleep(100ms) -- loginutils/getty.c), and the Sstc
+ * clockevent (stimecmp -> STIP) never fired. This file was re-audited line by
+ * line against the shipped XSA, AMD's canonical MBV DT (u-boot
+ * xilinx-mbv32.dts), OpenSBI 1.6 and kernel 6.18.7 sources: NO DEFECT FOUND
+ * HERE -- and OpenSBI + the kernel were additionally proven to parse THIS blob
+ * on qemu -M amd-microblaze-v-generic (mideleg 0x222, sstc detected,
+ * irq-xilinx num_irq=2). The remaining suspects are silicon-behavior questions
+ * (STIP generation, time-CSR tick rate, SEIP delivery). Board discriminator:
+ * mk_dtb.sh now also emits artifacts/mbv_soc_rescue.dtb (this DTB + bootargs
+ * "init=/bin/sh" -- a PID-1 shell has no pre-prompt sleep and its prompt fits
+ * the 16-byte TX FIFO, so it comes up even with every interrupt dead).
+ * Runbook + decision tree: src/linux_soc/hw/build_dbg/LOGIN_FIX_README.md.
+ *
+ * Earlier status, kept for history: before 2026-07-16 this DTB was
+ * unproven-by-execution; the qemu -M virt proof exercises none of this file
+ * (QEMU generates its own CLINT+PLIC+ns16550 DT).
+ */
+
+/*
+ * ---------------------------------------------------------------------------
+ * BOOT MEMORY MAP -- these addresses are NOT free parameters.
+ *
+ * OpenSBI 1.6 fw_jump is built FW_PIC (ELF type DYN) for platform=generic, so its
+ * next-stage addresses are computed PC-relative from wherever it is loaded. I read
+ * them out of the built binary (objdump of fw_next_addr / fw_next_arg1):
+ *
+ *   fw_next_addr = _fw_start + 0x0040_0000   (kernel)
+ *   fw_next_arg1 = _fw_start + 0x0220_0000   (DTB)
+ *   fw_next_mode = 1                         (PRV_S -- drops to S-mode. correct.)
+ *
+ * Loading OpenSBI at the DDR base therefore FORCES:
+ *
+ *   0x8000_0000  fw_jump.bin   OpenSBI (M-mode). 276 KiB (_fw_end = 0x45000).
+ *   0x8040_0000  Image         Linux. 4 MiB-aligned (rv32 Sv32 superpage) AND
+ *                              == DDR_BASE + the Image header's text_offset (0x400000).
+ *   0x8220_0000  mbv_soc.dtb   DTB. NOT a choice -- fw_jump hard-forces a1 to this.
+ *   0x8400_0000  rootfs.cpio.gz  initramfs. Free choice; see chosen/linux,initrd-*.
+ *
+ * Entry state the loader must set: PC = 0x8000_0000, a0 = 0 (hartid),
+ * a1 = 0x8220_0000. OpenSBI's fw_prev_arg1 returns 0, so it takes its OWN fdt
+ * pointer from the a1 the previous stage left in the register. a1 = garbage means
+ * "fdt_check_header failed" and a silent hang.
+ *
+ * TRAP: do NOT `elf load` fw_jump.elf. It is linked at vaddr 0x0, which on this SoC
+ * is the 128 KiB LMB BRAM, and it is 276 KiB -- it would overrun the BRAM. Load the
+ * raw fw_jump.BIN at 0x8000_0000.
+ *
+ * SQUEEZE (asserted by mk_dtb.sh): the kernel Image's effective size (header
+ * image_size, which INCLUDES bss) is 0x1DE4000 = 29.9 MiB, so it ends at
+ * 0x821E_4000 -- only 112 KiB below the forced DTB slot at 0x8220_0000. Add a few
+ * drivers and the kernel's bss clear silently eats the DTB. mk_dtb.sh fails the
+ * build if that margin goes negative.
+ *
+ * OpenSBI's own region needs no reservation here: platform/generic calls
+ * fdt_reserved_memory_fixup(), which appends /reserved-memory covering its
+ * PMP-protected firmware before handing the DTB to Linux. That call also grows the
+ * FDT in place by 1024 bytes, which is why mk_dtb.sh pads the DTB (dtc -p 4096).
+ * ---------------------------------------------------------------------------
+ */
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	model = "SoCLabs linux_soc (AMD MicroBlaze V / MPS3 KU115)";
+	compatible = "soclabs,linux-soc";
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		/*
+		 * uartlite has no baud divisor to program -- 115200 is fixed in HW
+		 * (XSA: C_BAUDRATE=115200), so "115200n8" here must MATCH the IP; it
+		 * cannot change it.
+		 *
+		 * earlycon=uartlite,mmio32,0x40600000 is valid: uartlite.c registers
+		 * EARLYCON_DECLARE(uartlite, ...) so "uartlite" is the right name, and
+		 * it also has OF_EARLYCON_DECLARE for xlnx,xps-uartlite-1.00.a so a bare
+		 * "earlycon" would resolve via stdout-path too. This prints before the
+		 * real console probes -- on a dead bring-up it is all you will see.
+		 *
+		 * NO root= : this SoC has NO block device of any kind (the BD is DDR +
+		 * uartlite + intc + timer -- there is no virtio, no SD, no flash on the
+		 * AXI map). The rootfs is an initramfs and ONLY an initramfs. The kernel
+		 * is built CONFIG_INITRAMFS_SOURCE="" (nothing built in) with
+		 * CONFIG_BLK_DEV_INITRD=y + CONFIG_RD_GZIP=y, so the gzipped cpio below
+		 * is the one and only rootfs path.
+		 *
+		 * The old "root=/dev/ram0 rw init=/sbin/init" was wrong twice over:
+		 * CONFIG_BLK_DEV_RAM is NOT set in this kernel (so /dev/ram0 can never
+		 * exist), and the cpio already contains /init, which the kernel runs as
+		 * ramdisk_execute_command without any init= at all.
+		 */
+		bootargs = "console=ttyUL0,115200 earlycon=uartlite,mmio32,0x40600000";
+
+		/*
+		 * THE ROOTFS. Without these two properties the kernel unpacks no
+		 * initramfs, finds no /init, falls through to prepare_namespace() and
+		 * panics "VFS: Unable to mount root fs on unknown-block(0,0)".
+		 *
+		 * The QEMU proof did NOT cover this: it booted -M virt with a virtio-blk
+		 * ext2 disk (root=/dev/vda), a device this SoC does not have.
+		 *
+		 * linux,initrd-end is STAMPED BY mk_dtb.sh from the real byte size of
+		 * artifacts/rootfs.cpio.gz. Do not hand-edit it; rerun mk_dtb.sh.
+		 */
+		linux,initrd-start = <0x84000000>;
+		linux,initrd-end   = <0x849e86a6>;
+	};
+
+	aliases {
+		/* OpenSBI resolves stdout-path "serial0:..." through here: it strips at
+		 * the ':' and calls fdt_path_offset(), which does alias lookup. */
+		serial0 = &uart0;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * Rate of the `time` CSR (rdtime). XSA: microblaze_riscv_0 C_FREQ =
+		 * 100000000, and MicroBlaze V has no separate mtime -- the counter runs
+		 * off the core clock (AMD's own BSP scales rdtime() by
+		 * Xil_GetRISCVFrequency()). arch/riscv/kernel/time.c PANICS without this.
+		 *
+		 * This is the one number here that the XSA cannot fully prove: it fixes
+		 * the CPU clock at 100 MHz, but "rdtime ticks once per CPU clock" is
+		 * inferred from the BSP, not measured. If it is wrong the box still
+		 * boots, it just keeps bad time -- check `date` against a stopwatch at
+		 * bring-up rather than trusting it.
+		 */
+		timebase-frequency = <100000000>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "amd,mbv32", "riscv";
+			reg = <0>;
+			status = "okay";
+			clock-frequency = <100000000>;	/* XSA: C_FREQ */
+			mmu-type = "riscv,sv32";	/* XSA: C_USE_MMU=3 (SUPERVISOR) */
+
+			/*
+			 * Every extension below is READ BACK FROM THE XSA -- none is
+			 * aspirational:
+			 *   m     <- C_USE_MULDIV=1
+			 *   a     <- C_USE_ATOMIC=1
+			 *   c     <- C_USE_COMPRESSION=1
+			 *   zba   <- C_USE_BITMAN_A=1
+			 *   zbb   <- C_USE_BITMAN_B=1
+			 *   zbs   <- C_USE_BITMAN_S=1
+			 *   zicntr<- C_USE_COUNTERS=1   (rdtime -> clocksource)
+			 *   sstc  <- C_USE_SSTC=1       (stimecmp -> clockevent)
+			 *
+			 * NOT claimed, because the hardware lacks them:
+			 *   zbc   -- C_USE_BITMAN_C=0 in the XSA. Do not add it.
+			 *   zicbom-- microblaze_riscv has no such parameter at all; the core
+			 *            does not implement cbo.*. The KERNEL is built
+			 *            CONFIG_RISCV_ISA_ZICBOM=y, but that is only a
+			 *            capability -- it emits cbo.* strictly if the DT ISA
+			 *            string permits it. Listing zicbom here would turn every
+			 *            cache-maintenance op into an illegal-instruction trap.
+			 *            (Userland is safe either way: the vendor glibc emits no
+			 *            cbo.*, despite its sysroot being *named*
+			 *            riscv32imac_zicbom_....)
+			 *
+			 * "sstc" is LOAD-BEARING, not decoration. This SoC has NO CLINT and
+			 * NO PLIC, so there is no mtimecmp for OpenSBI to build an SBI TIME
+			 * call on, and mainline has NO Xilinx AXI-timer clocksource driver
+			 * (drivers/clocksource contains zero xilinx files -- I checked the
+			 * 6.18.7 tree). The timebase works anyway because
+			 * drivers/clocksource/timer-riscv.c writes CSR_STIMECMP directly
+			 * when riscv_sstc_available, and riscv_sstc_available is set from
+			 * THIS list. Drop "sstc" and the kernel silently falls back to an SBI
+			 * timer this hardware cannot provide -> no clockevent -> dead box.
+			 *
+			 * The chain closes on the firmware side too: OpenSBI detects Sstc by
+			 * trap-probing CSR_STIMECMP (sbi_hart.c -- hardware truth, not the
+			 * DT) and then sets menvcfg.STCE, which is what permits S-mode Linux
+			 * to write stimecmp at all.
+			 *
+			 * Note the kernel itself was compiled rv32imac_zicsr_zifencei -- a
+			 * strict SUBSET of what the core implements. That is fine and
+			 * deliberate: the kernel simply does not emit zba/zbb/zbs itself, but
+			 * advertising them here lets it enable the hwcaps that the glibc
+			 * userland (which DOES emit Zbb in its string routines) needs.
+			 */
+			riscv,isa-base = "rv32i";
+			riscv,isa-extensions = "i", "m", "a", "c",
+					       "zicsr", "zifencei", "zicntr",
+					       "zba", "zbb", "zbs",
+					       "sstc";
+			/* deprecated, but CONFIG_RISCV_ISA_FALLBACK=y means older/fallback
+			 * parsing still reads it -- keep it consistent with the list above. */
+			riscv,isa = "rv32imac_zicsr_zifencei_zba_zbb_zbs";
+
+			cpu_intc: interrupt-controller {
+				compatible = "riscv,cpu-intc";
+				interrupt-controller;
+				#interrupt-cells = <1>;
+			};
+		};
+	};
+
+	/*
+	 * XSA: ddr4_0 C0_DDR4_ADDRESS_BLOCK = 0x8000_0000 .. 0xBFFF_FFFF (exactly 1 GiB),
+	 * on BOTH the IC and DC master spaces. Also exactly the cacheable window
+	 * (C_I/DCACHE_BASEADDR=0x80000000, HIGHADDR=0xbfffffff) -- cache covers all of RAM.
+	 *
+	 * 1 GiB, not the DIMM's 4 GiB, because rv32 Linux linearly maps lowmem from
+	 * PAGE_OFFSET (0xC000_0000) to the top of the 32-bit space and has no highmem.
+	 * Expect the kernel to report slightly LESS than 1 GiB usable -- it carves
+	 * fixmap/vmemmap off the top of the linear map. That is normal, not a bug.
+	 */
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x40000000>;
+	};
+
+	/* 100 MHz CPU/AXI clock (clk_wiz_0 off the 200 MHz DDR ui_clk).
+	 * XSA: axi_uartlite_0 C_S_AXI_ACLK_FREQ_HZ = 100000000,
+	 *      axi_intc_0     C_S_AXI_ACLK_FREQ_MHZ = 100.0. */
+	clk100: clock-100000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <100000000>;
+		clock-output-names = "clk100";
+	};
+
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/*
+		 * AXI INTC as a CHAINED controller under the hart's local intc.
+		 * irq-xilinx-intc.c supports this: with an interrupt-parent present it
+		 * maps its parent irq (irq_of_parse_and_map) and chains, instead of
+		 * calling set_handle_irq() as a root controller.
+		 *
+		 * interrupts = <9> = IRQ_S_EXT (S-mode external). Linux runs in S-mode
+		 * under OpenSBI, which delegates external interrupts down via mideleg.
+		 *
+		 * This WAS the design's biggest open question (ADDRESS_MAP.md sec.6.1
+		 * flags it as "the S-mode assumption, not a measured fact"), because
+		 * microblaze_riscv has a single Interrupt pin and the bare-metal BSP
+		 * treats it as MACHINE external (xil_exception.c sets MIE_MEIE, bit 11;
+		 * XIL_INTERRUPT_ID_MACHINE_EXTERNAL = 0x800000B). It is now settled from
+		 * the IP's own changelog:
+		 *
+		 *   2025.1.1 (Rev.6): "Implement supervisor mode delegation"
+		 *   2025.2   (Rev.7): "Include support for Supervisor External Interrupt"
+		 *
+		 * and this build is 2026.1 / Rev.9. The core implements seip and mideleg,
+		 * so <9> is right for an S-mode kernel.
+		 *
+		 * IF IT IS STILL WRONG ON SILICON the symptom is specific, so look for
+		 * it: the box boots and prints fine (earlycon and OpenSBI both POLL the
+		 * uartlite, no IRQ needed) and then wedges the instant anything waits on
+		 * a UART RX interrupt -- i.e. at the login prompt. `cat /proc/interrupts`
+		 * showing 0 on the uartlite line is the tell. The fix is <11> (IRQ_M_EXT)
+		 * ... which an S-mode kernel cannot take, so it would instead be a
+		 * HARDWARE finding: the BD would need to change. Flag it, do not paper
+		 * over it in software.
+		 *
+		 * xlnx,kind-of-intr MUST equal the hardware's C_KIND_OF_INTR.
+		 * XSA: C_KIND_OF_INTR = 0x00000000 -> all inputs LEVEL. irq-xilinx-intc
+		 * picks the edge- vs level- irq_chip straight off this word (xintc_map
+		 * tests intr_mask, NOT the type cell in `interrupts`); a mismatch gives
+		 * lost or permanently-stuck interrupts, with no error message.
+		 *
+		 * xlnx,num-intr-inputs is REQUIRED by the driver (it errors out without
+		 * it). XSA: C_NUM_INTR_INPUTS = 2 -- confirming Vivado's parameter
+		 * propagation really did widen the read-only default of 1 to match the
+		 * 2-bit xlconcat driving intr.
+		 */
+		axi_intc: interrupt-controller@41200000 {
+			compatible = "xlnx,xps-intc-1.00.a";
+			reg = <0x41200000 0x10000>;	/* XSA: C_BASEADDR/C_HIGHADDR */
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			xlnx,kind-of-intr = <0x0>;	/* XSA: C_KIND_OF_INTR -- all LEVEL */
+			xlnx,num-intr-inputs = <2>;	/* XSA: C_NUM_INTR_INPUTS */
+			interrupt-parent = <&cpu_intc>;
+			interrupts = <9>;		/* IRQ_S_EXT */
+		};
+
+		/*
+		 * INTC input 1. Traced in the XSA netlist, not assumed:
+		 *   net axi_uartlite_0_interrupt: axi_uartlite_0/interrupt -> intr_concat/In1
+		 * and intr_concat/dout -> axi_intc_0/intr. So hwirq = 1.
+		 *
+		 * Type cell 4 = IRQ_TYPE_LEVEL_HIGH. The hardware is level, active-high
+		 * (XSA: C_KIND_OF_INTR=0x0, C_IRQ_ACTIVE=0x1,
+		 * Sense_of_IRQ_Level_Type=Active_High). This cell is in practice cosmetic
+		 * for irq-xilinx-intc -- it has no .irq_set_type and takes edge/level from
+		 * xlnx,kind-of-intr -- but the DT should still describe the hardware.
+		 * (It was 0 = IRQ_TYPE_NONE; ADDRESS_MAP.md's skeleton says 2, which is
+		 * IRQ_TYPE_EDGE_FALLING and contradicts its own "level-high" comment.)
+		 *
+		 * clock-names is REQUIRED to actually bind the clock: uartlite.c calls
+		 * devm_clk_get(dev, "s_axi_aclk") -- a NAMED lookup. With `clocks` but no
+		 * `clock-names` the lookup returns -ENOENT and the driver silently
+		 * proceeds with no clock (it is optional). Harmless here, since uartlite's
+		 * baud is fixed in hardware and needs no divisor, but it should be right.
+		 */
+		uart0: serial@40600000 {
+			compatible = "xlnx,xps-uartlite-1.00.a";
+			reg = <0x40600000 0x10000>;	/* XSA: C_BASEADDR/C_HIGHADDR */
+			interrupt-parent = <&axi_intc>;
+			interrupts = <1 4>;		/* INTC input 1, IRQ_TYPE_LEVEL_HIGH */
+			clocks = <&clk100>;
+			clock-names = "s_axi_aclk";
+			current-speed = <115200>;	/* XSA: C_BAUDRATE */
+			xlnx,data-bits = <8>;		/* XSA: C_DATA_BITS */
+			xlnx,use-parity = <0>;		/* XSA: C_USE_PARITY */
+		};
+
+		/*
+		 * INTC input 0. Traced in the XSA netlist:
+		 *   net axi_timer_0_interrupt: axi_timer_0/interrupt -> intr_concat/In0
+		 *
+		 * Linux DOES NOT USE THIS TIMER, and that is intentional. Mainline has no
+		 * Xilinx AXI-timer clocksource/clockevent driver at all (the only in-tree
+		 * consumer of this IP is drivers/pwm/pwm-xilinx.c, which binds
+		 * "xlnx,axi-timer-2.0" -- a compatible this node deliberately does not
+		 * claim). Nothing binds here; the timebase comes from rdtime/stimecmp
+		 * (see the sstc note on cpu0). The node exists so the DT describes the
+		 * real hardware. Do not "fix" the missing driver.
+		 */
+		axi_timer: timer@41c00000 {
+			compatible = "xlnx,xps-timer-1.00.a";
+			reg = <0x41c00000 0x10000>;	/* XSA: C_BASEADDR/C_HIGHADDR */
+			interrupt-parent = <&axi_intc>;
+			interrupts = <0 4>;		/* INTC input 0, IRQ_TYPE_LEVEL_HIGH */
+			clocks = <&clk100>;
+			clock-names = "s_axi_aclk";
+			clock-frequency = <100000000>;
+			xlnx,count-width = <32>;	/* XSA: C_COUNT_WIDTH */
+			xlnx,one-timer-only = <0>;	/* XSA: C_ONE_TIMER_ONLY / enable_timer2=1 */
+			status = "okay";
+		};
+	};
+};

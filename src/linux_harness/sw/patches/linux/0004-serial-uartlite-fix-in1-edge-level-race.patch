@@ -1,0 +1,129 @@
+Subject: [PATCH] serial: uartlite: fix In1 edge-pulse-into-level-intc lost-byte race (SoCLabs MBV)
+
+On AMD MicroBlaze-V linux_soc the uartlite edge-pulse interrupt feeds an
+axi_intc forced to LEVEL; irq-xilinx-intc's handle_level_irq unmask does an
+IAR AFTER the ISR, stranding a byte that arrives in the drain->IAR window
+(no fresh edge) -> canonical getpass read() never wakes (board 2026-07-17,
+'Password:' then dead).  Mirror the proven In0 timer fix: when the intc is
+mapped (via the DT interrupt-parent) the ISR scrubs its own LVL_P latch
+(IAR + read-back) and re-checks RXVALID, looping until the FIFO is empty,
+shrinking the race window to a few cycles (<< one char time).  Inert when
+the intc cannot be mapped (stock drain-only path).  TX path unchanged.
+SILICON-UNVERIFIED: this race does not reproduce in QEMU (synchronous
+MMIO); confidence is from the axi_intc RTL + the board-proven In0 analog.
+
+--- a/drivers/tty/serial/uartlite.c	2026-07-17 17:21:19.785801754 +0100
++++ b/drivers/tty/serial/uartlite.c	2026-07-17 17:21:19.789802099 +0100
+@@ -23,6 +23,8 @@
+ #include <linux/clk.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/timer.h>
++#include <linux/of_address.h>
++#include <linux/of_irq.h>
+ 
+ #define ULITE_NAME		"ttyUL"
+ #if CONFIG_SERIAL_UARTLITE_NR_UARTS > 4
+@@ -98,6 +100,22 @@
+ 	unsigned int rx_poll_ms;
+ 	struct timer_list poll_timer;
+ 	struct uart_port *port;
++	/*
++	 * SoCLabs linux_soc In1 edge-pulse-into-LEVEL-intc race fix.
++	 * The uartlite interrupt is an edge pulse (PG142); the axi_intc is
++	 * forced LEVEL (C_KIND_OF_INTR=0), so its LVL_P latch captures the
++	 * pulse and holds until IAR. irq-xilinx-intc's handle_level_irq
++	 * unmask (intc_enable_or_unmask) issues an IAR *after* this ISR
++	 * returns; a byte that lands in the drain->that-IAR window has its
++	 * latch cleared with no fresh edge to follow => stranded byte, and
++	 * a canonical getpass read() that never wakes (board 2026-07-17).
++	 * When @intc_base is mapped (from the DT interrupt-parent) the ISR
++	 * scrubs its own intc latch and re-checks RXVALID, mirroring the
++	 * proven In0 timer fix (timer-soclabs-mbv.c) to shrink that window
++	 * to a few cycles. Zero-cost/inert when @intc_base is NULL.
++	 */
++	void __iomem *intc_base;
++	u32 intc_mask;
+ };
+ 
+ struct uartlite_reg_ops {
+@@ -240,17 +258,39 @@
+ static irqreturn_t ulite_isr(int irq, void *dev_id)
+ {
+ 	struct uart_port *port = dev_id;
++	struct uartlite_data *pdata = port->private_data;
+ 	int stat, busy, n = 0;
+ 	unsigned long flags;
+ 
+ 	do {
+-		uart_port_lock_irqsave(port, &flags);
++		do {
++			uart_port_lock_irqsave(port, &flags);
++			stat = uart_in32(ULITE_STATUS, port);
++			busy  = ulite_receive(port, stat);
++			busy |= ulite_transmit(port, stat);
++			uart_port_unlock_irqrestore(port, flags);
++			n++;
++		} while (busy);
++
++		/*
++		 * In1 race scrub (only when the intc is mapped): a byte may
++		 * have arrived during the drain above. Clear our intc LVL_P
++		 * latch now (W1C IAR), flush it with a read-back, then
++		 * re-sample STATUS. If RXVALID is set, that byte's latch was
++		 * just cleared by our IAR and would otherwise be stranded by
++		 * the framework's later unmask-IAR with no new edge -- so
++		 * loop and drain it. Repeat until an IAR-then-sample shows
++		 * the RX FIFO empty; only the few cycles between that final
++		 * sample and the framework's unmask-IAR remain, far below one
++		 * character time (~87 us at 115200) -- negligible at human
++		 * typing speed. TX path is untouched.
++		 */
++		if (!pdata->intc_base)
++			break;
++		iowrite32(pdata->intc_mask, pdata->intc_base + 0x0c); /* IAR */
++		(void)ioread32(pdata->intc_base + 0x00);              /* ISR: flush */
+ 		stat = uart_in32(ULITE_STATUS, port);
+-		busy  = ulite_receive(port, stat);
+-		busy |= ulite_transmit(port, stat);
+-		uart_port_unlock_irqrestore(port, flags);
+-		n++;
+-	} while (busy);
++	} while (stat & ULITE_STATUS_RXVALID);
+ 
+ 	/* work done? */
+ 	if (n > 1) {
+@@ -935,6 +975,34 @@
+ 		irq = platform_get_irq(pdev, 0);
+ 		if (irq < 0)
+ 			return irq;
++
++		/*
++		 * Map the parent AXI INTC (ack register) + our hwirq bit for
++		 * the In1 edge-into-level race scrub in ulite_isr. Best-effort:
++		 * if anything is missing the ISR falls back to the stock
++		 * drain-only path (the scrub is skipped when intc_base==NULL).
++		 */
++		if (IS_ENABLED(CONFIG_OF) && pdev->dev.of_node) {
++			struct device_node *np = pdev->dev.of_node;
++			struct device_node *pintc = of_irq_find_parent(np);
++			u32 hwirq;
++
++			if (pintc) {
++				pdata->intc_base = of_iomap(pintc, 0);
++				of_node_put(pintc);
++			}
++			if (pdata->intc_base &&
++			    !of_property_read_u32_index(np, "interrupts", 0,
++						        &hwirq) && hwirq < 32) {
++				pdata->intc_mask = BIT(hwirq);
++				dev_info(&pdev->dev,
++					 "In1 edge/level race scrub armed (intc hwirq %u)\n",
++					 hwirq);
++			} else if (pdata->intc_base) {
++				iounmap(pdata->intc_base);
++				pdata->intc_base = NULL;
++			}
++		}
+ 	}
+ 
+ 	pdata->clk = devm_clk_get(&pdev->dev, "s_axi_aclk");

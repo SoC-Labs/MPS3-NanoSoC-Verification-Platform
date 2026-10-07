@@ -1,0 +1,16 @@
+# External-module build for the MPS3 DFX swap driver.
+obj-m := mps3_dfx.o
+mps3_dfx-y := mps3_dfx_drv.o mps3_icap_engine.o mps3_icap_mock.o \
+	      mps3_swap_transitions.o
+
+# `make CHECK_FPGA=1` adds a compile-only object that forces the
+# fpga-mgr/fpga-bridge veneer on, so the veneer stays compilable against the
+# kernel's fpga headers even though this kernel has CONFIG_FPGA unset.
+# Symbols are unresolved by design: build it with KBUILD_MODPOST_WARN=1 and
+# never load it.
+ifneq ($(CHECK_FPGA),)
+obj-m += mps3_dfx_fpga_check.o
+mps3_dfx_fpga_check-y := mps3_dfx_drv_fpga_check.o mps3_icap_engine.o \
+			 mps3_icap_mock.o mps3_swap_transitions.o
+CFLAGS_mps3_dfx_drv_fpga_check.o := -DMPS3_FPGA_FORCE
+endif

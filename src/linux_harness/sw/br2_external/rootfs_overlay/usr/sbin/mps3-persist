@@ -1,0 +1,56 @@
+#!/bin/sh
+#
+# mps3-persist — look at, or prepare, /persist (IMAGE_CONTRACT §3).
+#
+#   mps3-persist status
+#   mps3-persist format --erase [DISK]
+#       mkfs.ext4 partition 3 of the harness card (default /dev/mmcblk0, or the
+#       disk named by mps3.persist_disk= on the cmdline). Refuses unless DISK
+#       carries the harness MBR layout (STAGE0_CONTRACT §6: entries 1+2 type
+#       0x7F, entry 3 type 0x83) and p3 is not mounted. DESTROYS p3.
+#
+# The image NEVER formats anything by itself (S12mps3persist boots a blank p3
+# with a volatile /persist); this command is the explicit way. The card's
+# partition table is STAGE0's (stage0_mkcard.py); this tool never writes it.
+
+LABEL=mps3-persist
+
+cmdline_arg() {
+    for a in $(cat /proc/cmdline 2>/dev/null); do
+        case "$a" in "$1="*) echo "${a#*=}"; return 0 ;; esac
+    done
+    return 1
+}
+part() { case "$1" in *[0-9]) echo "${1}p$2" ;; *) echo "$1$2" ;; esac; }
+mbr_byte() { dd if="$1" bs=1 skip="$2" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'; }
+
+case "$1" in
+    status|"")
+        cat /run/mps3/persist.state 2>/dev/null || echo "persist.state missing (S12mps3persist did not run)"
+        mountpoint -q /persist && df -h /persist 2>/dev/null | tail -n 1
+        for f in /persist/.layout /persist/ssh/authorized_keys /persist/dropbear/dropbear_ed25519_host_key; do
+            if [ -s "$f" ]; then echo "  present  $f"; else echo "  absent   $f"; fi
+        done
+        echo "  host key $(cat /run/mps3/ssh/host_key_sha256 2>/dev/null)"
+        ;;
+    format)
+        [ "$2" = "--erase" ] || { echo "usage: mps3-persist format --erase [DISK]  (destroys partition 3)"; exit 2; }
+        disk=${3:-$(cmdline_arg mps3.persist_disk || echo /dev/mmcblk0)}
+        [ -b "$disk" ] || { echo "mps3-persist: no disk $disk"; exit 1; }
+        [ "$(mbr_byte "$disk" 510)$(mbr_byte "$disk" 511)" = 55aa ] && \
+            [ "$(mbr_byte "$disk" 450)" = 7f ] && [ "$(mbr_byte "$disk" 466)" = 7f ] && \
+            [ "$(mbr_byte "$disk" 482)" = 83 ] || {
+                echo "mps3-persist: $disk does not carry the harness layout (p1/p2 0x7F, p3 0x83) — refusing"
+                echo "              make the card with stage0_mkcard.py (STAGE0_CONTRACT §6) first"
+                exit 1; }
+        p3=$(part "$disk" 3)
+        [ -b "$p3" ] || { echo "mps3-persist: no $p3"; exit 1; }
+        grep -q "^$p3 " /proc/mounts && { echo "mps3-persist: $p3 is mounted"; exit 1; }
+        mkfs.ext4 -q -F -L "$LABEL" -J size=16 \
+            -E lazy_itable_init=1,lazy_journal_init=1 "$p3" || exit 1
+        sync
+        echo "mps3-persist: formatted $p3 (ext4, LABEL=$LABEL); reboot to use it (mps3-reboot)"
+        ;;
+    *)
+        echo "usage: mps3-persist [status | format --erase [DISK]]"; exit 2 ;;
+esac

@@ -1,0 +1,43 @@
+tests/hostio4_link_cdc result
+captured: 2026-07-10 11:51 UTC  host: <build-host>  sim: vcs T-2022.06
+RTL: $(NANOSOC_M0_SOC_SRC)/nanosoc_arch_tech/rtl/hostio4 -- the tree nanoSoC is built from
+     (resolved as fpga/monolithic/filelist.tcl does; NOT the orphan m0plus tree)
+
+  compile OK  (RTL: $SOCLABS_NANOSOC_SOC_DIR/nanosoc_arch_tech/rtl/hostio4)
+== clock ratios (nbytes=64/channel) ==
+  ratio_coprime            PASS    (64635000 ps)
+  ratio_near_unity         PASS    (77405000 ps)
+  ratio_dut_slow           PASS    (185940000 ps)
+  ratio_dut_fast           PASS    (185455000 ps)
+  ratio_phase_offset       PASS    (64605000 ps)
+== negative controls (each MUST fail) ==
+  neg_ack_stuck            fails as required  -- link stalled -- no byte moved for 100000 C_clk cycles
+  neg_data_rev             fails as required  -- 2 byte mismatches
+  neg_over_skew            fails as required  -- 2 byte mismatches
+== iodata4 skew budget vs the 2FF strobe ==
+   target-receive, T=7.3ns => budget 2*T = 14.6 ns
+  skew_t_under_14ns        PASS    (32595000 ps)
+  skew_t_over_16ns         fails as required  -- 3 byte mismatches
+   ...and it scales with the RECEIVER's clock: T=20.3ns => 2*T = 40.6 ns
+  skew_t_under_40ns        PASS    (63075000 ps)
+  skew_t_over_42ns         fails as required  -- 2 byte mismatches
+   ...not with the TRANSMITTER's (same cliff at C=5 and C=40)
+  skew_t_txclk_fast        PASS    (23703000 ps)
+  skew_t_txclk_slow        fails as required  -- 1 byte mismatches
+   controller-receive, C=10.0ns => safe bound 2*C = 20.0 ns
+  skew_c_under_19ns        PASS    (32595000 ps)
+  skew_c_over_26ns         fails as required  -- 2 byte mismatches
+== what the 2FF synchronisers buy (testmode=1 bypasses them) ==
+  sync_bypass_noskew       PASS    (8275000 ps)
+     ^ PASSES. Two clocks alone cannot detect a missing synchroniser.
+  sync_bypass_skew02       fails as required  -- 1 byte mismatches
+  sync_real_skew12         PASS    (32595000 ps)
+     ^ budget collapses from 14.6 ns to under 0.2 ns without the 2FFs.
+== a harmonic clock ratio HIDES an over-budget skew ==
+  mask_harmonic_1to2       PASS    (62205000 ps)
+     ^ 42 ns skew, budget 40 ns, yet it passes: phase is frozen at 1:2.
+  mask_detuned_1p5pct      fails as required  -- 2 byte mismatches
+     ^ same skew, target clock detuned 1.5%: caught immediately.
+
+  L1 PASS: byte-exact across unrelated clocks; the bench detects a stuck
+           ack, a reversed bus, over-budget skew, and a missing 2FF.

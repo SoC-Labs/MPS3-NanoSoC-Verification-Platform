@@ -1,0 +1,677 @@
+/dts-v1/;
+
+/*
+ * shell_linux.dts — device tree for the FULL Linux harness shell:
+ * the MPS3 static shell (TRANSPLANT_CONTRACT.md) with the classic MicroBlaze
+ * transplanted to MicroBlaze V (RV32IMAC, Sv32) + DDR4 1 GiB, per the proven
+ * linux_soc recipe (src/linux_soc/hw/mbv_soc.tcl + linux/mbv_soc.dts).
+ *
+ * STATUS: DESIGN ARTIFACT. The successor BD does not exist yet; nothing here
+ * has been validated against an XSA, let alone silicon. Every node cites its
+ * ground truth (shell_bd.tcl line / TRANSPLANT_CONTRACT section / firmware
+ * source); every value that only a built BD can prove is marked
+ * "CONFIRM-AT-INTEGRATION". Companion doc: DRIVER_MATRIX.md (same directory).
+ *
+ * CHANGELOG:
+ *   2026-07-17 (M7b transplant-fold): SILICON ERRATA E1/E2/E3 folded in from
+ *     the linux_soc board windows (2026-07-16/17, MPS3 KU115). The MBV V core's
+ *     architected S-mode timer is UNUSABLE on this silicon:
+ *       E1 "Sstc dead" — writing stimecmp never raises a deliverable S-mode
+ *          timer interrupt (rdtime/Zicntr counts fine, so it stays clocksource);
+ *       E2 "STIP stuck" — mip.STIP, once set from M-mode, never clears again
+ *          (an SBI/plan-C injected STIP livelocks the timer handler).
+ *     Fix (silicon-proven: 2500+ ticks, zero spurious): the kernel tick moves
+ *     onto the AXI timer delivered as a NORMAL S-mode external interrupt (SEIP)
+ *     through the AXI INTC. Two coupled DT changes below:
+ *       (a) axi_timer compatible now LEADS with "soclabs,mbv-timer" (binds the
+ *           errata clockevent driver, patches/linux/0003 + CONFIG_SOCLABS_MBV_
+ *           TIMER; inert on any node without the prefix);
+ *       (b) "sstc" DROPPED from cpu riscv,isa-extensions so the kernel never
+ *           programs the dead stimecmp path (see mbv_soc.tcl re-enable note:
+ *           restore sstc + drop the timer prefix once AMD ships fixed IP —
+ *           one kernel binary serves both).
+ *     The HW keeps C_USE_SSTC=1 (latent capability, unchanged in the BD); the
+ *     drop is DEPLOYED-DT-only. E3 "wfi never wakes" is a HARDWARE fix already
+ *     asserted in the BD (C_INTERRUPT_WAKEUP=1) — no DT representation. Console
+ *     stays the STOCK IRQ-driven uartlite (SEIP path proven healthy; no
+ *     rx-poll-ms belt-and-braces needed). Ground truth: linux_soc
+ *     patches/linux/0003-clocksource-soclabs-mbv-*.patch, mk_dtb_pland.sh,
+ *     hw/build_dbg/{LOGIN_FIX_README,WORKAROUND_BOOT_README}.md.
+ *   2026-07-16 (judge-fix wave): axi_intc kind-of-intr CONFIRM item RESOLVED
+ *     — shell_linux_bd.tcl now pins + post-validate-asserts C_KIND_OF_INTR
+ *     =0x0 (LVL_P-latch rationale, linux_soc IRQ_WIRING_AUDIT.md), so
+ *     xlnx,kind-of-intr = <0x0> here matches the BD by construction. The BD
+ *     also pins C_USE_SSTC/C_USE_COUNTERS (the "sstc"/"zicntr" extension
+ *     strings below stay load-bearing) and C_INTERRUPT_WAKEUP=1 (wfi-coma
+ *     fix — no DT representation, hardware-only).
+ *   2026-07-15: initial authoring.
+ *
+ * BASELINE DECLARATION (required by TRANSPLANT_CONTRACT "BASELINE WARNING"):
+ * this DTS forks the WORKING-TREE shell_bd.tcl (41 cells: Wave-4 CLCD-KVM
+ * present @0x44AD_0000, QSPI v0.2 boundary, 19-interface decoupler,
+ * OVLSTORE SPI_0 external port REMOVED). Rationale: the CPU transplant
+ * re-mints static_id and re-implements all 8 RM overlays regardless of fork
+ * point, so fork where development is heading, not where the board is.
+ * Consequences encoded below: the OVLSTORE spi node is status="disabled"
+ * (its SPI master drives nothing — the RP owns the SST26 pads in v0.2), and
+ * clcd_kvm is a real node. If the successor instead forks the board-proven
+ * 0xE4B1C44A baseline: delete clcd_kvm@44ad0000, enable spi@44a40000 (and
+ * its flash child), and drop decoupler IDs 15-18 from the BD.
+ *
+ * CLOCK ARCHITECTURE: contract §9.3 option (a) — clk_wiz_shell keeps
+ * generating the 100 MHz shell_clk from OSCCLK1; the MBV + the whole 16-slave
+ * fabric stay on shell_clk; smartconnect_ddr does the 100<->200 MHz (ui_clk)
+ * crossing exactly as in mbv_soc.tcl. The DDR domain therefore needs NO DT
+ * representation (memory is transparent), and every s_axi_aclk below is the
+ * one 100 MHz clock. If option (b) (ui_clk-derived shell_clk) is chosen
+ * instead, re-derive clk100 and timebase-frequency — do not blend silently.
+ *
+ * ADDRESS MAP: verbatim from TRANSPLANT_CONTRACT §2 (which is confirmed
+ * against the built bd_summary.txt 2026-07-11 except CLCDKVM). All shell CSR
+ * bases are FROZEN — firmware/common/platform_regs.h and the host tooling
+ * bake them. The reg windows below are the full 64 KiB pages; the
+ * C_S_AXI_ADDR_WIDTH=32 decode lesson lives in the BD, not here.
+ *
+ * BOOT MEMORY MAP — same forced layout as linux_soc (see mbv_soc.dts header;
+ * OpenSBI 1.6 fw_jump FW_PIC, addresses read out of the binary):
+ *   0x8000_0000  fw_jump.bin  (OpenSBI, M-mode)
+ *   0x8040_0000  Image        (= _fw_start + fw_next_addr offset 0x40_0000)
+ *   0x8220_0000  this DTB     (= fw_next_arg1 — NOT a choice)
+ *   0x8400_0000  rootfs.cpio.gz initramfs
+ *   0xBFF0_0000  ramoops      (reserved below — diag-mailbox successor)
+ * Entry: PC=0x8000_0000, a0=0, a1=0x8220_0000. Do NOT elf-load fw_jump.elf.
+ * linux,initrd-end must be STAMPED from the real rootfs size (mk_dtb.sh
+ * pattern — port the script; also keep its kernel-vs-DTB squeeze assert and
+ * dtc -p 4096 padding for OpenSBI's in-place FDT fixup).
+ */
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	model = "SoCLabs MPS3 nanosoc Linux harness shell (MicroBlaze V successor)";
+	compatible = "soclabs,mps3-harness-shell";
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		/*
+		 * console/earlycon: same uartlite story as mbv_soc.dts (fixed
+		 * 115200 in HW, earlycon prints before the console probes).
+		 *
+		 * uio_pdrv_genirq.of_id=generic-uio is LOAD-BEARING: it is what
+		 * binds every "generic-uio" node below (the module's of_id list
+		 * is empty by default). Without it, no /dev/uioN, and every
+		 * harness daemon (6900/6920/2542/6930-2, CLCD) is dead.
+		 *
+		 * No root= : initramfs-only, same as linux_soc (the QSPI flash
+		 * is NOT a rootfs candidate — see the spi node; and the D16
+		 * shared-flash hazard forbids casual writes anyway).
+		 */
+		bootargs = "console=ttyUL0,115200 earlycon=uartlite,mmio32,0x40600000 uio_pdrv_genirq.of_id=generic-uio";
+
+		/* STAMP linux,initrd-end from the real cpio size (mk_dtb.sh
+		 * pattern). Placeholder end = start + 16 MiB. */
+		linux,initrd-start = <0x84000000>;
+		linux,initrd-end   = <0x85000000>;
+	};
+
+	aliases {
+		serial0 = &uart0;
+		ethernet0 = &eth0;
+		spi0 = &ovlstore_spi;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * MBV core config = the PROVEN linux_soc core, verbatim
+		 * (mbv_soc.tcl; XSA-audited in linux_soc/linux/README.md §5).
+		 * The successor BD must read-back-assert C_USE_COUNTERS==1
+		 * (rdtime/Zicntr = the kernel's clocksource — no CLINT, no PLIC
+		 * exists) and C_INTERRUPT_WAKEUP==1 (E3 wfi-coma fix). It also
+		 * keeps C_USE_SSTC==1 as a LATENT capability, but per silicon
+		 * errata E1/E2 (see header) "sstc" is DROPPED from the deployed
+		 * DT below and the clockevent moves to the AXI timer on SEIP —
+		 * NOT stimecmp. CONFIRM-AT-INTEGRATION: timebase == final C_FREQ
+		 * (100 MHz shell_clk under clock option (a)).
+		 */
+		timebase-frequency = <100000000>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "amd,mbv32", "riscv";
+			reg = <0>;
+			status = "okay";
+			clock-frequency = <100000000>;	/* C_FREQ, option (a) */
+			mmu-type = "riscv,sv32";	/* C_USE_MMU=3 */
+
+			/*
+			 * Extension list copied from the XSA-audited linux_soc
+			 * DTS. Do NOT add zbc (C_USE_BITMAN_C=0) or zicbom (the
+			 * core has no cbo.* — listing it makes the kernel emit
+			 * illegal instructions).
+			 *
+			 * "sstc" is DELIBERATELY ABSENT (silicon errata E1/E2,
+			 * see header + linux_soc mk_dtb_pland.sh): advertising it
+			 * would make the kernel program the dead stimecmp
+			 * comparator (E1) and register the riscv-timer clockevent,
+			 * and nothing may depend on STIP given E2 (stuck-once-set).
+			 * "zicntr" STAYS — rdtime is still the clocksource; the
+			 * tick comes from the "soclabs,mbv-timer" node below. Fixed
+			 * -IP re-enable: restore "sstc" here AND drop that node's
+			 * "soclabs,mbv-timer" prefix, same commit.
+			 */
+			riscv,isa-base = "rv32i";
+			riscv,isa-extensions = "i", "m", "a", "c",
+					       "zicsr", "zifencei", "zicntr",
+					       "zba", "zbb", "zbs";
+			riscv,isa = "rv32imac_zicsr_zifencei_zba_zbb_zbs";
+
+			cpu_intc: interrupt-controller {
+				compatible = "riscv,cpu-intc";
+				interrupt-controller;
+				#interrupt-cells = <1>;
+			};
+		};
+	};
+
+	/*
+	 * DDR4 MIG @0x8000_0000, exactly 1 GiB (mbv_soc.tcl: explicit
+	 * assign_bd_address 0x8000_0000..0xBFFF_FFFF; rv32 lowmem limit).
+	 * Banks 49-51, SLR1 — kept separable from the SLR0 RP pblock/ICAP.
+	 */
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x40000000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/*
+		 * THE DIAG-MAILBOX SUCCESSOR (SERVICE_DISPOSITION red flag 4).
+		 * The LMB/MDM JTAG mailbox @0xFFF80 (magic 0xD1A6C0DE) dies
+		 * with the LMB; it was the ONLY mid-swap diagnostics path.
+		 * Replacement: ramoops/pstore in the top 1 MiB of DDR —
+		 * survives a warm reset, readable post-mortem from
+		 * /sys/fs/pstore (or via XSDB mem-read of 0xBFF00000 while
+		 * wedged, which restores the "readable while the OS is stuck"
+		 * property; the magic-scan discipline carries over: pstore
+		 * headers are self-describing).
+		 * The `diag` verb's 14 frozen JSON keys are a DAEMON
+		 * obligation, not a DT one (SERVICE_DISPOSITION §2).
+		 */
+		ramoops@bff00000 {
+			compatible = "ramoops";
+			reg = <0xbff00000 0x100000>;
+			record-size  = <0x20000>;
+			console-size = <0x40000>;
+			pmsg-size    = <0x20000>;
+		};
+	};
+
+	/* 50 MHz board oscillator (OSCCLK1 -> IBUF/BUFG in shell_top.sv).
+	 * Referenced by clk_wiz_dut as clk_in1. */
+	clk50: clock-50000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <50000000>;
+		clock-output-names = "osc_clk_50m";
+	};
+
+	/* 100 MHz shell_clk = clk_wiz_shell/clk_out1 (contract §5). Fixed:
+	 * clk_wiz_shell has NO AXI interface — it is not software-visible,
+	 * so a fixed-clock is the honest model. (The 50 MHz rmii_ref_clk
+	 * clk_out2 has no Linux consumer and is deliberately not modelled.) */
+	clk100: clock-100000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <100000000>;
+		clock-output-names = "shell_clk";
+	};
+
+	/* LAN9220 supplies: both rails are hard-wired 3V3 on the MPS3.
+	 * fixed-regulators keep smsc911x's regulator_bulk_get clean instead
+	 * of relying on dummy-regulator fallback warnings. */
+	reg_3v3: regulator-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "board-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/*
+		 * AXI INTC, chained under the hart's local intc at hwirq 9
+		 * (IRQ_S_EXT) — the S-mode delegation question is settled for
+		 * this IP generation (linux_soc README §5.4; core is Rev 9,
+		 * seip/mideleg since Rev 6/7). Bring-up tell if wrong: boots,
+		 * prints, wedges at the login prompt with 0 uartlite IRQs.
+		 *
+		 * 4 inputs, traced in shell_bd.tcl SECTION 4 (lines 1067-1071):
+		 *   In0 = axi_hwicap_0/ip2intc_irpt   (wired -quiet)
+		 *   In1 = axi_timer_0/interrupt
+		 *   In2 = axi_uartlite_0/interrupt
+		 *   In3 = BD port eth_irq  (ETH_INT pad via shell_top.sv:217)
+		 * NB the transplant KEEPS these sources on the same bits
+		 * (contract §4) — only the irq output re-targets the MBV.
+		 *
+		 * kind-of-intr — RESOLVED 2026-07-16 (was CONFIRM-AT-
+		 * INTEGRATION): shell_linux_bd.tcl PINS C_KIND_OF_INTR=0x0
+		 * (all level, DEV-5) and read-back-asserts it pre- AND
+		 * post-validate, so <0x0> below equals the built BD by
+		 * construction (build/address_map.txt intc_kind_of_intr is
+		 * the read-back). Vivado's manual-vs-computed warning
+		 * (computed 0x4: the uartlite pin is metadata'd EDGE_RISING)
+		 * is expected+benign — axi_intc's LEVEL-mode LVL_P detector
+		 * latches the pulse until IAR ack (linux_soc
+		 * IRQ_WIRING_AUDIT.md §2). Do not flip this word to the
+		 * computed value without changing the BD assert in the same
+		 * commit: irq-xilinx-intc picks its edge-vs-level irq_chip
+		 * off this word and a mismatch is silent lost/stuck IRQs.
+		 */
+		axi_intc: interrupt-controller@41200000 {
+			compatible = "xlnx,xps-intc-1.00.a";
+			reg = <0x41200000 0x10000>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			xlnx,kind-of-intr = <0x0>;	/* == BD C_KIND_OF_INTR, asserted post-validate [FIX-C] */
+			xlnx,num-intr-inputs = <4>;	/* == C_NUM_INTR_INPUTS, asserted ==4 post-validate */
+			interrupt-parent = <&cpu_intc>;
+			interrupts = <9>;		/* IRQ_S_EXT */
+		};
+
+		/* Console fallback UART (contract §2: 0x4060_0000, M10).
+		 * Under Linux this is THE console — the physical FT4232 pair,
+		 * STOCK IRQ-driven uartlite (INTC In2). The SEIP external-irq
+		 * path is silicon-proven healthy alongside the errata timer
+		 * tick (linux_soc _irquart window), so no xlnx,rx-poll-ms
+		 * belt-and-braces is needed here. 115200 fixed in hardware. */
+		uart0: serial@40600000 {
+			compatible = "xlnx,xps-uartlite-1.00.a";
+			reg = <0x40600000 0x10000>;
+			interrupt-parent = <&axi_intc>;
+			interrupts = <2 4>;		/* In2, IRQ_TYPE_LEVEL_HIGH */
+			clocks = <&clk100>;
+			clock-names = "s_axi_aclk";	/* NAMED lookup — required to bind */
+			current-speed = <115200>;
+			xlnx,data-bits = <8>;
+			xlnx,use-parity = <0>;
+		};
+
+		/*
+		 * AXI timer @0x41C0_0000, INTC In1 — THE KERNEL CLOCKEVENT
+		 * (silicon errata E1/E2, see header). Leading compatible
+		 * "soclabs,mbv-timer" binds the errata clockevent driver
+		 * (linux_soc patches/linux/0003-clocksource-soclabs-mbv-*.patch;
+		 * requires CONFIG_SOCLABS_MBV_TIMER=y in the kernel fragment):
+		 * channel 0 delivers the tick as a NORMAL S-mode external
+		 * interrupt (SEIP) through the AXI INTC, bypassing the dead
+		 * stimecmp/STIP path. The driver's ISR ack sequence (T0INT W1C
+		 * + read-back, then own-bit INTC IAR scrub + read-back) depends
+		 * on the LEVEL typing (C_KIND_OF_INTR=0) — do not flip In1 to
+		 * edge. rdtime (Zicntr) stays the clocksource; this node is NOT
+		 * a clocksource. The trailing "xlnx,xps-timer-1.00.a" keeps it a
+		 * valid AXI-timer node; the driver is inert without the prefix
+		 * (that IS the fixed-IP re-enable path). Still deliberately does
+		 * NOT claim "xlnx,axi-timer-2.0" (that would bind pwm-xilinx).
+		 * clock-frequency is REQUIRED by the driver (tick-delta base) —
+		 * must equal the synthesized 100 MHz shell_clk or time drifts.
+		 */
+		axi_timer: timer@41c00000 {
+			compatible = "soclabs,mbv-timer", "xlnx,xps-timer-1.00.a";
+			reg = <0x41c00000 0x10000>;
+			interrupt-parent = <&axi_intc>;
+			interrupts = <1 4>;		/* In1, IRQ_TYPE_LEVEL_HIGH (SEIP tick, level ack) */
+			clocks = <&clk100>;
+			clock-names = "s_axi_aclk";
+			clock-frequency = <100000000>;	/* REQUIRED by soclabs-mbv-timer */
+			xlnx,count-width = <32>;
+			xlnx,one-timer-only = <0>;	/* enable_timer2=1 in the BD [DEV-6] */
+		};
+
+		/*
+		 * LAN9220 behind axi_emc @0xC000_0000.
+		 * The EMC decodes 16 MiB; the device occupies 256 B, aliased.
+		 * Driver: stock smsc911x (of_match needs "smsc,lan9115").
+		 *
+		 * reg-io-width = <4> (32-bit). FIXED 2026-07-18 (was <2>, which
+		 * caused a heap-corruption crash ~57 s into boot — an hrtimer
+		 * ->function smashed to 0x80000000, Fatal exception in interrupt;
+		 * disabling this node eliminated the crash, so smsc911x was the
+		 * corruptor. docs/evidence/wave4_hrtimer_oops_20260718.log).
+		 *
+		 * The prior <2> conflated C_MEM0_WIDTH=16 (the axi_emc EXTERNAL
+		 * memory-pin width, EMC<->LAN9220) with the AXI-side register
+		 * access width that reg-io-width actually selects. The AXI EMC
+		 * assembles two 16-bit external cycles into one 32-bit AXI beat,
+		 * so software sees a 32-bit device. GROUND TRUTH: the silicon-
+		 * proven bare-metal firmware accesses every LAN9220 register AND
+		 * both data FIFOs as a single 32-bit access at its natural byte
+		 * offset (firmware/common/platform_regs.h MPS3_REG32 =
+		 * *(volatile uint32_t *); firmware/harness_app/lan9220.c reg_r/
+		 * reg_w + the RX/TX FIFO loops). reg-io-width=<4> makes smsc911x
+		 * use readl()/ioread32_rep() (smsc911x.c __smsc911x_reg_read /
+		 * smsc911x_rx_readfifo, gated on SMSC911X_USE_32BIT set only when
+		 * width==4 at smsc911x.c:2396) — byte-identical to the firmware.
+		 * With <2> the driver instead does paired narrow readw(reg)+
+		 * readw(reg+2) per register: non-FIFO regs (BYTE_TEST) survive so
+		 * probe passes, but each 32-bit FIFO word becomes TWO narrow
+		 * accesses to the popping RX/TX data FIFO, desyncing the RX read
+		 * and overrunning the skb into adjacent slab. Mainline confirms
+		 * <4> for LAN9115/9118 behind a memory-mapped bus: arm/
+		 * vexpress-v2m-rs1.dtsi, arm-realview-pb1176/pb11mp all use
+		 * reg-io-width = <4> (the MPS2 an385/an399 DTs omit the property
+		 * = default 16-bit, but those use the Arm CMSDK 16-bit AHB, a
+		 * different memory controller than this Xilinx AXI EMC).
+		 *
+		 * IRQ: RESOLVED — eth_irq IS wired to INTC In3 in the BD
+		 * (shell_bd.tcl:1071); SERVICE_DISPOSITION red-flag 1 really
+		 * refers to the POLARITY obligation on shell_top.sv:217-221:
+		 * the LAN9220 IRQ pin powers up active-low open-drain and must
+		 * be programmed IRQ_POL=1 + push-pull before the line is
+		 * enabled. The two smsc,* flags below make the Linux driver do
+		 * exactly that write itself (IRQ_CFG) — no BD change needed.
+		 *
+		 * MAC: the shell's locally-administered bring-up MAC
+		 * ("MPS" tail, net_if_lwip.c:732) — keeps ARP caches and the
+		 * fpgahub 192.168.10.101 static-IP block stable across the
+		 * firmware->Linux cutover.
+		 *
+		 * PROMISCUOUS-MODE DECISION (SERVICE_DISPOSITION red flag 6)
+		 * is a userspace obligation, not DT: the daemon must
+		 * `ip link set eth0 promisc on` iff the shared-port/two-MAC
+		 * model (spec §8.3) is still in force on this successor.
+		 */
+		eth0: ethernet@c0000000 {
+			compatible = "smsc,lan9220", "smsc,lan9115";
+			reg = <0xc0000000 0x10000>;
+			interrupt-parent = <&axi_intc>;
+			interrupts = <3 4>;		/* In3, IRQ_TYPE_LEVEL_HIGH */
+			reg-io-width = <4>;		/* 32-bit AXI access (matches firmware; see note above) */
+			/* NO smsc,irq-active-high / smsc,irq-push-pull -- DELIBERATE.
+			 * MEASURED ON SILICON 2026-07-19 (masked-IRQ devmem experiment):
+			 * writing INT_CFG=0x111 (IRQ_EN|IRQ_POL=1|push-pull) makes this
+			 * part assert its IRQ pin while INT_STS=0 and INT_EN=0 -- i.e.
+			 * nothing pending, no source enabled, yet axi_intc ISR bit3 went
+			 * asserted.  With those flags set, smsc911x_open() programs that
+			 * polarity, request_irq() unmasks In3 and the CPU is starved
+			 * instantly (silent freeze -- an IRQ storm stops even printk on an
+			 * interrupt-driven console).
+			 * So we keep the chip's NATIVE open-drain ACTIVE-LOW output:
+			 * ETH_INT idles HIGH via the pad PULLUP, is pulled LOW to assert,
+			 * and shell_linux_top.sv feeds axi_intc (active-high/level) the
+			 * INVERSE via `.eth_irq(~ETH_INT)`.
+			 * These three (no flags + PULLUP + RTL invert) MUST ship together;
+			 * any two alone reproduce the livelock.  Do not re-add these flags.
+			 */
+			smsc,force-internal-phy;	/* internal PHY, addr 1 (firmware fact) */
+			local-mac-address = [02 00 00 4D 50 53];
+			vdd33a-supply = <&reg_3v3>;
+			vddvario-supply = <&reg_3v3>;
+			phy-mode = "mii";
+		};
+
+		/*
+		 * OVLSTORE AXI Quad SPI @0x44A4_0000 (contract cell #26).
+		 * status DISABLED on this (working-tree/QSPI-v0.2) baseline:
+		 * the SPI_0 external port was REMOVED from the BD — the RP owns
+		 * the SST26 pads and this master drives NOTHING. Enabling it
+		 * would probe a bus with no wires. The node is kept (a) as the
+		 * 0xE4B1C44A-fork variant, ready to flip on, and (b) so the
+		 * A/B-slot MTD partition layout (overlay_store.h, frozen
+		 * offsets) is recorded where the kernel will eventually read
+		 * it. No interrupt is wired (INTC has no free input) —
+		 * spi-xilinx poll-mode fallback; CONFIRM-AT-INTEGRATION on
+		 * 6.18 (see DRIVER_MATRIX).
+		 * D16 HAZARD: even when enabled, slot A/B staging and
+		 * overlay_store_commit() must not run until the shared-flash
+		 * collision is owned (memory: qspi-shared-flash-hazard).
+		 */
+		ovlstore_spi: spi@44a40000 {
+			compatible = "xlnx,xps-spi-2.00.a";
+			reg = <0x44a40000 0x10000>;
+			clocks = <&clk100>;
+			clock-names = "axi_clk";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			xlnx,num-ss-bits = <1>;
+			fifo-size = <16>;		/* firmware assumption; CONFIRM C_FIFO_DEPTH */
+			status = "disabled";
+
+			flash@0 {
+				compatible = "sst,sst26vf064b", "jedec,spi-nor";
+				reg = <0>;
+				/* ext_spi_clk = 100 MHz shell_clk; sck = /2 =
+				 * 50 MHz max. Conservative cap: */
+				spi-max-frequency = <25000000>;
+
+				partitions {
+					compatible = "fixed-partitions";
+					#address-cells = <1>;
+					#size-cells = <1>;
+
+					/* overlay_store.h frozen layout */
+					partition@0 {
+						label = "ovl-header";
+						reg = <0x000000 0x010000>;
+					};
+					partition@10000 {
+						label = "ovl-slot-a";
+						reg = <0x010000 0x3f0000>;
+					};
+					partition@400000 {
+						label = "ovl-slot-b";
+						reg = <0x400000 0x380000>;
+					};
+					partition@780000 {
+						label = "ovl-clearing-stage";
+						reg = <0x780000 0x040000>;
+					};
+					partition@7c0000 {
+						label = "ovl-clearing-cache";
+						reg = <0x7c0000 0x040000>;
+					};
+				};
+			};
+		};
+
+		/*
+		 * clk_wiz_dut AXI-Lite DRP @0x44AB_0000 — the ONLY arbitrary
+		 * DUT-clock reconfig path (contract §5; the CLKRST
+		 * DUT_CLK_SEL/DRP registers are INERT — RTL never wired them).
+		 * Driver: stock clk-xlnx-clock-wizard; replaces the firmware's
+		 * hand-rolled PG065 sequence (CFG_REG0 M/D -> CFG_REG2 O ->
+		 * LOAD|SEN -> poll LOCKED). The 6900 daemon's set_clk verb
+		 * becomes a clk_set_rate on output 0.
+		 * CONFIRM-AT-INTEGRATION: xlnx,speed-grade must match the
+		 * KU115 part on the MPS3 (believed -2 — read the BD part).
+		 * D12 (real dut_clk target) inherited, still open.
+		 */
+		clk_wiz_dut: clock-controller@44ab0000 {
+			compatible = "xlnx,clocking-wizard-v6.0", "xlnx,clocking-wizard";
+			reg = <0x44ab0000 0x10000>;
+			#clock-cells = <1>;
+			clocks = <&clk50>, <&clk100>;
+			clock-names = "clk_in1", "s_axi_aclk";
+			xlnx,speed-grade = <2>;		/* CONFIRM-AT-INTEGRATION */
+			xlnx,nr-outputs = <1>;		/* clk_out1 = dut_clk, 50 MHz default */
+		};
+
+		/*
+		 * ============ THE DFX SWAP FABRIC (custom-driver land) =======
+		 * No in-tree fpga-manager exists for AXI HWICAP (flagged, not
+		 * solved — tasking + SERVICE_DISPOSITION §4). The nodes below
+		 * carry BOTH the future custom-driver compatible (first) and
+		 * "generic-uio" (fallback), so the daemon-orchestrated interim
+		 * (UIO mmap, porting swap_fsm sequencing verbatim to userspace)
+		 * works on day one and the custom fpga-manager/bridge pair can
+		 * take over without a DTB change (its driver match simply
+		 * outranks nothing — remove "generic-uio" from these two nodes
+		 * when the kernel drivers land, so both cannot race).
+		 */
+
+		/* AXI HWICAP @0x44A2_0000 -> ICAPE3 (CONFIG_SITE_X0Y0, SLR0).
+		 * C_MODE 0 = FIFO mode, write-FIFO depth 1024 words; icap_clk =
+		 * shell_clk. INTC In0 (ip2intc_irpt) available to the future
+		 * driver; the firmware never used it (poll model). All the
+		 * silicon-found mechanics the driver MUST reproduce (CR bit0=
+		 * WRITE/bit1=READ, MSB-first word packing for AA995566,
+		 * bounded fail-closed polls, chunk-with-scheduling-points) are
+		 * specified in SERVICE_DISPOSITION §4. */
+		hwicap: hwicap@44a20000 {
+			compatible = "soclabs,mps3-hwicap-fpga-mgr",
+				     "xlnx,axi-hwicap-3.0",
+				     "generic-uio";
+			reg = <0x44a20000 0x10000>;
+			interrupt-parent = <&axi_intc>;
+			interrupts = <0 4>;		/* In0, IRQ_TYPE_LEVEL_HIGH */
+			clocks = <&clk100>;
+			clock-names = "icap_clk";
+			xlnx,write-fifo-depth = <1024>;	/* C_WRITE_FIFO_DEPTH; FIFO mode C_MODE=0 */
+		};
+
+		/* DFXCTL @0x44A1_0000 (soclabs dfx_ctl): decouple/shutdown/
+		 * rp-reset-gate + RM_ID/RM_STATUS genuine-verify. Future shape:
+		 * fpga-bridge (enable = decouple released). RM_ID must be read
+		 * with the RP CONNECTED and re-isolated on mismatch — that
+		 * ordering lives in the driver/daemon, not here. */
+		dfx_ctl: dfx-ctl@44a10000 {
+			compatible = "soclabs,dfx-ctl-1.0", "generic-uio";
+			reg = <0x44a10000 0x10000>;
+		};
+
+		/* CLKRST @0x44A0_0000: RESET_CTRL (dut/rp/dbg, 1=released) +
+		 * inert clock regs. Split ownership (SERVICE_DISPOSITION §3.6):
+		 * rp_resetn is swap-sequenced (belongs to the DFX driver /
+		 * swap daemon, never host-writable mid-swap); dut/dbg resets
+		 * serve the 6900 `reset` verb and OpenOCD srst. A reset pulse
+		 * must respect the 3-FF dut_clk synchronizer minimum assert
+		 * width at the SLOWEST dut_clk — no bare toggles. */
+		dut_clkrst: clkrst@44a00000 {
+			compatible = "soclabs,dut-clkrst-1.0", "generic-uio";
+			reg = <0x44a00000 0x10000>;
+		};
+
+		/* ============ UIO-bound harness CSR blocks ============
+		 * All are shell-regmap.md v0.5 blocks with non-standard
+		 * layouts; each backs a frozen-protocol daemon (ports in
+		 * SERVICE_DISPOSITION §2). None has an interrupt (poll-model
+		 * hardware); uio_pdrv_genirq accepts irq-less nodes. */
+
+		/* SWDBB @0x44A7_0000 -> daemon on :6920 (OpenOCD
+		 * remote_bitbang, byte-exact; 'c' sample replies ASCII 0/1). */
+		swd_bb: swd-bb@44a70000 {
+			compatible = "soclabs,swd-bb-1.0", "generic-uio";
+			reg = <0x44a70000 0x10000>;
+		};
+
+		/* DBGBR (debug_bridge, AXI->BSCAN, XAPP1251 layout)
+		 * @0x44A8_0000 -> XVC daemon on :2542. Access ORDER is
+		 * conformance-bound: TDO only after GO self-clears; mid-swap
+		 * shift: STALLS (never errors) so hw_server survives swaps. */
+		dbg_bridge: dbgbr@44a80000 {
+			compatible = "soclabs,dbgbr-xvc-1.0", "generic-uio";
+			reg = <0x44a80000 0x10000>;
+		};
+
+		/* UARTBR @0x44A9_0000: U0/U1/SWO async FIFOs (dut_clk CDC)
+		 * -> daemon on :6930/:6931/:6932. READS ARE DESTRUCTIVE
+		 * (regmap v0.5) — exactly one reader process, ever. Not a tty:
+		 * the UIO daemon is the faithful port; serdev is a later
+		 * nicety. */
+		uart_bridge: uartbr@44a90000 {
+			compatible = "soclabs,uart-bridge-1.0", "generic-uio";
+			reg = <0x44a90000 0x10000>;
+		};
+
+		/* board_gpio @0x44AA_0000: IN/OUT/OE/OWN with a per-bit
+		 * host-vs-DUT ownership mux — non-standard, so UIO rather than
+		 * a lying gpio-mmio claim. Heartbeat = bit0 (daemon-driven,
+		 * 1 Hz). */
+		board_gpio: gpio@44aa0000 {
+			compatible = "soclabs,board-gpio-1.0", "generic-uio";
+			reg = <0x44aa0000 0x10000>;
+		};
+
+		/* TELEM @0x44A5_0000: INA228 seam TIED OFF in the BD
+		 * (SIM_FAKE_DATA 0, inputs grounded, four independent
+		 * dead-ends). Mapped so the daemon can honour the FROZEN
+		 * telemetry response {"ok":false,"err":"no power sensor",
+		 * "lockup":...} — lockup actually comes from DFXCTL.RM_STATUS.
+		 * Do not "fix" this. */
+		telem: telem@44a50000 {
+			compatible = "soclabs,telem-1.0", "generic-uio";
+			reg = <0x44a50000 0x10000>;
+		};
+
+		/* CLCD @0x44AC_0000: HX8347-D 8080 byte-FIFO master (panel
+		 * LIT on silicon 2026-07-14). NO framebuffer exists — panel
+		 * GRAM is the framebuffer, and CMD/DATA writes are silently
+		 * DROPPED on FIFO-full (deliberate), so the writer must poll
+		 * STATUS.level. Explicitly NOT fbdev/DRM (SERVICE_DISPOSITION
+		 * §3.10) — UIO + the text-renderer daemon. */
+		clcd: clcd@44ac0000 {
+			compatible = "soclabs,clcd-8080-1.0", "generic-uio";
+			reg = <0x44ac0000 0x10000>;
+		};
+
+		/* CLCDKVM @0x44AD_0000 — Wave 4, EXISTS on this baseline
+		 * (working tree) but has NEVER been built or run. If this DTB
+		 * is ever pointed at the then-shipped 0xE4B1C44A shell, this page
+		 * is a silent DECERR: the daemon MUST keep the firmware's
+		 * presence gate (probe once, decline `display` verb if
+		 * absent). EVENT reg is W1C — never read-to-clear, never
+		 * blind-clear; repaint on harness_gained|panel_reset_done. */
+		clcd_kvm: clcd-kvm@44ad0000 {
+			compatible = "soclabs,clcd-kvm-1.0", "generic-uio";
+			reg = <0x44ad0000 0x10000>;
+		};
+
+		/* VPHY @0x44A3_0000 — RESERVED page, NO SLAVE EXISTS
+		 * (deferred ethernet wave; decoupler IDs 1-5 sinks dangle by
+		 * design). Node present so the address is claimed and the
+		 * `link` verb's target is documented; enable when the wave
+		 * lands. Access today = DECERR. */
+		vphy: vphy@44a30000 {
+			compatible = "soclabs,vphy-1.0", "generic-uio";
+			reg = <0x44a30000 0x10000>;
+			status = "disabled";
+		};
+
+		/* GENCHK @0x44A6_0000 — RESERVED page, NO SLAVE EXISTS (same
+		 * wave as VPHY). Counters are clear-on-enable-rise when it
+		 * lands (host reasons in per-session deltas). */
+		genchk: genchk@44a60000 {
+			compatible = "soclabs,genchk-1.0", "generic-uio";
+			reg = <0x44a60000 0x10000>;
+			status = "disabled";
+		};
+	};
+
+	/*
+	 * fpga-region tying manager+bridge together — DESIGN INTENT for the
+	 * future custom drivers (root-level: a region is not a bus device);
+	 * disabled until they exist. Activating a region without the
+	 * swap-sequencing driver would bypass the clearing-before-partial and
+	 * RM_ID-verify invariants. The interim UIO daemon does not use this.
+	 */
+	rp_region: fpga-region0 {
+		compatible = "fpga-region";
+		fpga-mgr = <&hwicap>;
+		fpga-bridges = <&dfx_ctl>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+		status = "disabled";
+	};
+};

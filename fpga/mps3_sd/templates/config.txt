@@ -1,0 +1,46 @@
+TITLE: nanoSoC MPS3 (HBI0309) FPGA prototyping board configuration file
+;
+; Root MCC config for a mps3-nanosoc-platform shippable SD bundle.
+; The MPS3 Motherboard Configuration Controller (MCC) reads THIS file first on
+; every power-on, then follows the per-variant MB/HBI0309<rev>/board.txt.
+;
+; Layout is modelled on the Arm MPS3 "Boardfiles" config.txt for STRUCTURE only.
+; Every value here is the SoCLabs nanoSoC platform's own — there is no Arm
+; application-note (AN543 etc.) content in this bundle.
+;
+; This file is board-revision independent: one config.txt sits at the SD root
+; and the MCC auto-selects the MB/HBI0309<A|B|C>/ subtree that matches the
+; board it detects. See fpga/mps3_sd/README.md.
+
+[CONFIGURATION]
+AUTORUN: TRUE              ;Auto-program the FPGA + release the SoC from power on
+AUTORUNDELAY: 3           ;Seconds to wait for a serial key-press to halt auto-boot
+RTC: FALSE                ;TRUE = enable the MCC's own RTC
+
+; UARTMODE was 0 (MCC:FPGA0) for the life of this platform, and that is why the
+; shell's own console has never been readable: it is an FPGA-side UART lane, and
+; lanes 0 and 1 reach a host ONLY through a mux the MCC drives from this key
+; (TRM 100765_0000_04_en s3.5.2 p3-64). 1 = MCC:FPGA1 selects lane 1, which is
+; where the console is on the FIELDED bitstream -- so this line, an SD rewrite
+; and a power-cycle make it readable on host port 1 with no rebuild. The durable
+; fix re-pins the console to hard-wired lane 2 and needs a mint
+; (fpga/shell/constraints/mps3_harness.xdc); after that this key stops mattering
+; to the console. scripts/harness_gates/check_console_channel.py holds this
+; value, the XDC and docs/BOARD_BRINGUP.md's CONSOLE_CHANNEL marker together.
+UARTMODE: 1               ;0-MCC:FPGA0, 1-MCC:FPGA1, 2-MCC/FPGA0:FPGA1
+REMAP: BRAM               ;Boot device BRAM/DDR/QSPI (nanoSoC boots from BRAM/IMEM)
+FPGA_SMB: TRUE            ;MCC SMB sideband available (LAN9220 SMB path — see nanosoc.txt)
+FPGA_SCC: TRUE            ;MCC SCC sideband available
+FMC_FORCE: FALSE          ;Force FMC power ON
+
+DVIMODE: VGA              ;VGA/SVGA/XGA/SXGA/UXGA/HD1080 (unused by nanoSoC)
+
+USERSWITCH: 00000000      ;USERSWITCH[7:0] in binary
+CONFSWITCH: 00000000      ;Configuration switch[7:0] in binary
+ASSERTNPOR: TRUE          ;External resets assert nPOR
+WDTRESET: NONE            ;Watchdog reset options NONE/RESETMB/RESETDB
+
+USB_REMOTE: TRUE          ;Allow a remote reboot over USB (drop reboot.txt on the SD)
+
+MACADDRESS: 0xFFFFFFFFFFFF ;MCC management MAC (0xFFFF..=use board EEPROM). This is
+                          ;NOT the LAN9220 data-plane MAC used by nanoSoC firmware.

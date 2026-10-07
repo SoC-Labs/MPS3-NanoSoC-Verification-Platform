@@ -1,0 +1,22 @@
+BOARD: @BOARD@
+TITLE: nanoSoC motherboard configuration file
+;
+; Per-variant MCC motherboard config. assemble_sd.sh stamps the @BOARD@ token
+; with HBI0309A / HBI0309B / HBI0309C.
+;
+; FINDING (see README.md): in the Arm MPS3 reference bundle the A/B/C board.txt
+; files are byte-identical apart from this BOARD: line — the MB BIOS and the
+; application note are shared across all three revisions. The same holds for our
+; bundle, so ONE parameterised template covers all three variants.
+;
+; Layout mirrors the Arm MPS3 board.txt; APPFILE points at OUR nanoSoC FPGA
+; config (Nanosoc\nanosoc.txt), not any Arm application note.
+
+[MCCS]
+MBBIOS: mbb_v141.ebf           ;MB BIOS image — STOCK Arm MCC firmware already present
+                               ;on the SD. We do NOT ship it (Arm IP); do not delete it.
+
+[APPLICATION NOTE]
+APPFILE: Nanosoc\nanosoc.txt   ;nanoSoC FPGA config. The DOS '\' separator is
+                               ;MANDATORY — a '/' silently fails to find the file
+                               ;and leaves the FPGA unprogrammed (dead PBON, no UART).

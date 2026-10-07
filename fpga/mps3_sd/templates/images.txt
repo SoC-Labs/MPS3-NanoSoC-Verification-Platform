@@ -1,0 +1,17 @@
+TITLE: nanoSoC MPS3 images configuration file
+;
+; OPTIONAL. Preload software image(s) into the SoC at MCC program time. Lives
+; alongside nanosoc.txt under MB/HBI0309<rev>/Nanosoc/ and is only staged into a
+; bundle when assemble_sd.sh is run with --with-images.
+;
+; nanoSoC normally boots firmware baked into nanosoc.bit (BRAM/IMEM) or DMA-boots
+; from QSPI flash, so NO images are required here — this template ships with
+; TOTALIMAGES: 0 and all entries commented. Uncomment + edit to preload an
+; .axf/.bin into a target address (files go under a SOFTWARE/ dir on the SD).
+
+[IMAGES]
+TOTALIMAGES: 0                       ;Number of active images (max 32)
+
+;IMAGE0ADDRESS: 0x00000000           ;Target load address
+;IMAGE0UPDATE: RAM                   ;Image update: NONE/RAM/AUTOQSPI/FORCEQSPI
+;IMAGE0FILE: \SOFTWARE\app.bin       ;Image filename on the SD (DOS '\' separator)

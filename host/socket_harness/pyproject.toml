@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mps3-socket-harness"
+version = "0.1.0"
+description = "Board-free unified endpoint layer over mps3-pyverify: one frozen registry + base Session (SWD/UART/SWO/XVC + xsdb CSR access) + a ser2net-ready pty/tcp console bridge for the MPS3 nanoSoC harness."
+requires-python = ">=3.10"
+dependencies = ["mps3-pyverify"]
+# The ONLY dependency is mps3-pyverify. Everything else is stdlib:
+# socket, os, pty, termios, select, subprocess, json, enum, dataclasses,
+# abc, re, struct. Mirroring pyverify's own "no hard runtime deps" scope
+# note: keeping this dependency-free (beyond pyverify) means the harness
+# vendors cleanly onto the Pi-5 tender or a Jupyter host with nothing
+# beyond the stdlib + Python >=3.10 + the already-vendored pyverify.
+#
+# RECOMMENDATION (packaging direction): ship socket_harness as its own
+# package that DEPENDS ON mps3-pyverify — do NOT fold it into pyverify
+# yet. pyverify's SocketTransport/ConsoleReader stay exactly as-is behind
+# the identical LineChannel/ByteChannel interface this harness defines, and
+# are only refactored onto session.py AFTER this harness is proven on the
+# board. Two packages, one contract: socket_harness.session.LineChannel is
+# byte-identical to pyverify.client.Transport so a LineSession is a drop-in
+# ShellClient transport.
+
+[project.optional-dependencies]
+# Only needed to run host/socket_harness/tests/ (all board-free, in-process
+# fakes + pty loopback — no real sockets to a board).
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["socket_harness*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

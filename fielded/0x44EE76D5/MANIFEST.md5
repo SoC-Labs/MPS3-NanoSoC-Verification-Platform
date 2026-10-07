@@ -1,0 +1,88 @@
+# MANIFEST.md5 -- static 0x44EE76D5, mint 3 RC2: the FIELDED Linux harness (MicroBlaze V, Vivado 2026.1).
+#
+# `md5sum -c MANIFEST.md5` from inside this directory. Two sets, one static:
+#
+# (1) THE MINT'S SET -- generated 2026-09-28 (lane KIT-RC2) from the preserved mint, lx fb1f8c7
+#     (feat/linux-harness, clean): fpga/dfx/build_mint3_rc2/{prod,shell_proj} (static_canon.json at
+#     its root), and on the hub at <hub-host>:<hub-home>/mints/0x44EE76D5/ (stage-8 set, copied
+#     2026-09-25). static_routed_locked.dcp is the one that matters: every RM ever built for this
+#     static links against it (its CRC-32 IS the static_id).
+#     RENAMED IN THIS RECORD at the cutover (fetch_fielded.sh maps them back to their source names):
+#       config_rm_greybox_stage0_mint.bit  <- the mint's own bake, stored as config_rm_greybox_stage0.bit
+#       stage0_bake_mint.json              <- the mint's stage0_bake.json
+#     because config_rm_greybox_stage0.bit / stage0_bake.json in a fielded record are "what the board
+#     boots", which linux_bundle.json and scripts/harness_gates/check_image_overlay_match.py hold it to.
+#
+# (2) THE FIELDED SET -- the per-board config-SD bits and the release image. Not in the mint's build
+#     dir: built by the stage0 re-bakes of 2026-09-28 (updatemem, BRAM + CRC frames only: static_id,
+#     UserID 0xFB1F8C76 and USR_ACCESS 0x01000000 are the mint's) and the clean image build of
+#     2026-09-28 (ad297bf, dirty=0). Hub copy: <hub-home>/mints/0x44EE76D5/fielded/ (made at the
+#     cutover, C3; before that the files are in <hub-home>/pv_field/ and the Linux lead's lanes).
+#       config_rm_greybox_stage0.bit          BOARD 1 (<board-1 target>) config SD since 2026-09-28 21:10
+#                                             sha256 f876e73e412c35b65130a7966819d63cce3ec1f5aa5b6e8f9838f43c7a9660ba
+#                                             stage0 build 0x34956F94 (cd767ae cold-start fix + 34956f9 identity),
+#                                             label MPS3-01, 192.168.10.101, MAC 02:00:00:4D:50:53
+#       stage0_field_b1.elf                   the stage0 in it (sha256 7612bfc5afe8...)
+#       config_rm_greybox_stage0_b2.bit       BOARD 2 (<board-2 target>) config SD NOW (since 2026-09-28)
+#                                             sha256 f206f788f7497b650b6f0408ebb2fbdb795edb749784a3ec42e6caaaa3df5058
+#                                             stage0 build 0x6FAE6A0B: rescue IP <board-2 IP> only, NO cold-start
+#                                             fix, NO identity publish (shows board 1's MAC under Linux)
+#       stage0_b2.elf                         the stage0 in it (sha256 1bbfc229caf3...)
+#       config_rm_greybox_stage0_field_b2.bit BOARD 2's NEXT bake, built, NOT FIELDED (needs PB0 cover on site)
+#                                             sha256 d7d0d37601843df2a99aa4429c43b5033050f216082d7133b632eddff3356015
+#                                             stage0 build 0x34956F94, label MPS3-02, <board-2 IP>, MAC 02:00:00:00:02:FE
+#       stage0_field_b2.elf                   the stage0 in it (sha256 d62a4bbfe5c1...)
+#       linux_slot.img                        rc2_v7, the card image (both slots of board 1 since 2026-09-29)
+#                                             sha256 05c83617bfac30c6c66a09dc946b2243cb9112692a9afa2d8352bcba054569ea
+#       linux_slot_v7n.img                    rc2_v7n, the netboot image (board 2 via b2_keeper; persist=off)
+#                                             sha256 65b6bbaf16171c10aaef80c5f44aab2b93800400183b0e2c7613456aec059680
+#       linux_legal_info.tar                  Buildroot legal-info for rc2_v7/v7n (GPL: travels with every copy)
+#                                             sha256 5ae61c197d2578185c62b732e76e5e50d153aabd96fec65b08f876737c562375
+#       linux_bundle.json (tracked)           the release manifest, sha256 333a69704437...; it names BOARD 1's pair
+#       stage0_bake.json (tracked)            board 1's bake record (was the mint's; see (1))
+#       stage0_bake_b2.json, stage0_bake_field_b2.json (tracked)   board 2's current and next bake records
+#
+# Not listed: the RC2 re-bake of 2026-09-26 (sha256 286ae54d..., stage0 build 0xC457D656,
+# stage0_bake_rebake.json). It was on board 1's config SD from 2026-09-26 to 2026-09-28 21:10 and is on
+# no board now; no copy of the bit is archived. The 13 Linux overlays (overlay_mbv/) are not listed
+# either: make fielded-files keeps only the .ltx-bearing RMs' pairs, so C3 copies overlay_mbv/ to the
+# hub beside this set (CUTOVER_RUNBOOK_LINUX.md C3).
+#
+8c7198a572c2c607803367c836e596b0  config_rm_dbg_demo.ltx
+929c57f019a14419e1d2910c04bbbcda  config_rm_dbg_demo.ltx.json
+57d6ce40c19f049ae20275c578292615  config_rm_dbg_demo_pblock_rp_dut_partial.bin
+400e915610a9b2cf4ded592fdb12c581  config_rm_dbg_demo_pblock_rp_dut_partial_clear.bin
+f60469b8f293384aaa4067b648245227  config_rm_greybox.bit
+8d152c662d7f7cf3c155d432e408f587  config_rm_greybox.mmi
+0ecfd5769f2d87ffcbc8e83c1ab578ff  config_rm_greybox_routed.dcp
+cb2c8c8285b69ce6058543e4f087715d  config_rm_greybox_stage0.bit
+76222ae75ff03bea1a569aab96f49a8d  config_rm_greybox_stage0_b2.bit
+afc51f822e89455a698ef5bac186e175  config_rm_greybox_stage0_field_b2.bit
+7fb3c29def25d64d44b5309909052094  config_rm_greybox_stage0_mint.bit
+47bcbf55e8488eef1b8217dfce4d9343  config_rm_greybox_static.ltx
+8bcc4c8b248a20128e903839aed4a184  config_rm_greybox_static.ltx.json
+eae609fad9cdd7356023793a00189489  config_rm_nanosoc_ila.ltx
+2375dd25f21826c0641f3326b78f543e  config_rm_nanosoc_ila.ltx.json
+2362a85091e3b01d28ebd233fdc59259  config_rm_nanosoc_ila_pblock_rp_dut_partial.bin
+41017f59cfd5310e0ec2716d5aab0d1a  config_rm_nanosoc_ila_pblock_rp_dut_partial_clear.bin
+2a568315817e37f89cf4a1da920a652a  debug_core_rm_greybox_static.rpt
+a0d4522f1876d1e958c0c8b07c4130ad  linux_bundle.json
+43c74fc8abe96d902f99d841c580177f  linux_legal_info.tar
+6f45a0f87f55dc3b507a9708f4967b63  linux_slot.img
+ae1892f42305578aeb4ce864b4166d70  linux_slot_v7n.img
+e422f765af190b8cd799cec0790cb22f  mint.json
+6d551fbcc17ed7224b17dc269739dc5f  overlay_inputs.txt
+1a8f727323b8e492cce1210e5d2927f1  shell_harness.xsa
+7d9050f83380aee951d671bbc72bb2e5  shell_static_synth.dcp
+d305839049d0ebb41a157f9f8d3c9f3c  stage0.elf
+f215b767affa289a6d782df1cd77e100  stage0_b2.elf
+96eb420e3b5877e7da5302d5b38843f5  stage0_bake.json
+a7dc9e97b792f7ed27a772b22a51c833  stage0_bake_b2.json
+6e73b5bf19a66fd889648a962f3304ff  stage0_bake_field_b2.json
+8fbeb1647272f7e769f161972867430a  stage0_bake_mint.json
+baa8d706d5e56e1514af5c3b16e00529  stage0_field_b1.elf
+1591ff34f51145fef0c192ef4cec2e0e  stage0_field_b2.elf
+7d73c0ed473cee21afb8d8c9499c774e  static_canon.json
+86a165cb798de85daabac0ce36e7f6a7  static_id.txt
+3597be51918a3274bb35c02fc3feebcc  static_routed_locked.dcp
+a880a0cda386cd94977c8b891740a1de  static_stamp.json

@@ -1,0 +1,61 @@
+#!/bin/sh
+#
+# S10mps3dfx — load the MPS3 DFX swap driver (mps3_dfx.ko) so /dev/mps3dfx
+# exists before the swap service (S90mps3d -> mps3-ctrld's swap worker) needs
+# it. The chardev is created automatically by devtmpfs on misc_register.
+#
+# BACKEND is a DEPLOY-TIME TECH SEAM (same discipline as static_id), read
+# from /etc/mps3/dfx.conf via $DFX_MODULE_ARGS:
+#   mock=1  in-kernel behavioural mock — QEMU / bench with no real ICAPE3
+#           (the SHIPPED DEFAULT: this image is sim/QEMU-verified only)
+#   mock=0  real MMIO ICAP (0x44A0/44A1/44A2) — SET AT BOARD PROVISIONING
+#           (Wave-4 B1, first real swap through ICAPE3)
+# Absent conf => mock=1, so the QEMU swap path is live out of the box.
+
+CONF=/etc/mps3/dfx.conf
+DFX_MODULE_ARGS="mock=1"
+[ -r "$CONF" ] && . "$CONF"
+
+MOD=mps3_dfx
+# Buildroot's kernel-module infra installs to updates/; older/other layouts
+# use extra/. modprobe (below) resolves via depmod regardless; this is only
+# the direct-insmod fallback path.
+KO=$(ls "/lib/modules/$(uname -r)"/updates/${MOD}.ko \
+        "/lib/modules/$(uname -r)"/extra/${MOD}.ko 2>/dev/null | head -1)
+DEV=/dev/mps3dfx
+
+start() {
+    printf 'Loading %s (%s): ' "$MOD" "$DFX_MODULE_ARGS"
+    if grep -q "^$MOD " /proc/modules 2>/dev/null; then
+        echo "already loaded"
+        return 0
+    fi
+    # modprobe resolves via depmod's modules.dep (extra/ is indexed); fall
+    # back to a direct insmod of the installed .ko if modprobe is unhappy.
+    if modprobe "$MOD" $DFX_MODULE_ARGS 2>/dev/null || \
+       { [ -f "$KO" ] && insmod "$KO" $DFX_MODULE_ARGS 2>/dev/null; }; then
+        # devtmpfs creates $DEV synchronously in misc_register(); confirm.
+        if [ -e "$DEV" ]; then
+            echo "OK ($DEV)"
+        else
+            echo "loaded but $DEV MISSING (devtmpfs?)"
+        fi
+    else
+        echo "FAIL (module absent or refused)"
+        return 1
+    fi
+}
+
+stop() {
+    grep -q "^$MOD " /proc/modules 2>/dev/null || return 0
+    printf 'Unloading %s: ' "$MOD"
+    if rmmod "$MOD" 2>/dev/null; then echo "OK"; else echo "busy"; fi
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
+exit 0

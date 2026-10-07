@@ -1,0 +1,11 @@
+--- a/fpga/Makefile	2026-09-10 15:00:50.567924273 +0100
++++ b/fpga/Makefile	2026-09-10 15:00:50.629930324 +0100
+@@ -229,7 +229,7 @@
+ # a non-existent compiler name `$(TARGET)-gcc`.
+ firmware: soc_model
+ 	$(MAKE) -C $(ETH_SS_HOME) firmware TARGET=arm-none-eabi CPU=$(CPU) \
+-	    GNU_CC_EXTRA_FLAGS='$(FW_BOARD_DEF)'
++	    NANOSOC_EXTRA_CFLAGS='$(FW_BOARD_DEF)'
+ ifneq ($(BOARD_NAME),default)
+ 	@mkdir -p $(FW_OUT_ROOT)/$(BOARD_NAME)
+ 	@cp $(FW_OUT_ROOT)/udp_echo.bin $(FW_OUT_ROOT)/$(BOARD_NAME)/udp_echo.bin

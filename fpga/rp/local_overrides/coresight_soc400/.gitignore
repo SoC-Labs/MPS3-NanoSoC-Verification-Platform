@@ -1,0 +1,6 @@
+# Local, build-only overrides of Arm SoC-400 confidential IP (Academic Access
+# license). NEVER commit the copied/patched Arm RTL — this repo pushes to a
+# public remote. Track only this .gitignore and README.md.
+*
+!.gitignore
+!README.md

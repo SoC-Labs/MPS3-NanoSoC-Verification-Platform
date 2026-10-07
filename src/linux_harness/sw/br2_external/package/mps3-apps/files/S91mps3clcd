@@ -1,0 +1,41 @@
+#!/bin/sh
+#
+# S91mps3clcd — the harness status display + boot-status surface (M5).
+#   mps3-status : writes /run/mps3/status.json once at boot (works on any
+#                 platform, QEMU included — pure file sources)
+#   mps3-clcdd  : drives the CLCD panel via the UIO "clcd" node and keeps
+#                 status.json refreshed. On a platform with no CLCD block
+#                 (QEMU -M virt) it logs and exits 0 — deliberate, not a
+#                 failure; do not "fix" it into a respawn loop.
+#
+# Runs after S90mps3d so the daemons' pidfiles exist for future surfacing.
+
+DAEMON=/usr/sbin/mps3-clcdd
+STATUS=/usr/bin/mps3-status
+JSON=/run/mps3/status.json
+
+start() {
+    mkdir -p /run/mps3
+    printf 'Boot status surface: '
+    "$STATUS" -i /etc/mps3/static_id -o "$JSON" && echo "OK ($JSON)" || echo "FAIL"
+
+    printf 'Starting mps3-clcdd: '
+    start-stop-daemon -S -b -m -p /var/run/mps3-clcdd.pid \
+        -x "$DAEMON" -- -i /etc/mps3/static_id -o "$JSON"
+    [ $? -eq 0 ] && echo "OK" || echo "FAIL"
+}
+
+stop() {
+    printf 'Stopping mps3-clcdd: '
+    start-stop-daemon -K -q -p /var/run/mps3-clcdd.pid
+    [ $? -eq 0 ] && echo "OK" || echo "FAIL"
+    rm -f /var/run/mps3-clcdd.pid
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
+exit 0

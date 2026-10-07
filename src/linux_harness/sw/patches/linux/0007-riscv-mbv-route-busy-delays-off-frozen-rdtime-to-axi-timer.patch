@@ -1,0 +1,111 @@
+From: SoC Labs MPS3 harness <noreply@soclabs.org>
+Subject: [PATCH] riscv: MPS3/MBV - route busy-delays (__delay/udelay) off
+ the frozen rdtime onto the AXI-timer free-running counter
+
+On the MPS3 MicroBlaze-V, the RISC-V 'time' CSR (get_cycles()) freezes
+inside a tight busy-spin, so every udelay/ndelay/mdelay hangs forever.
+Proven on silicon: __delay pinned with elapsed=0 for >10 min at a sane
+cycle target. The AXI timer's free-running counter (already this
+platform's clocksource) does not freeze. The timer driver registers a
+read of it; __delay uses it once available, falling back to get_cycles()
+during early boot. Same 100 MHz as riscv_timebase, so no rescale.
+---
+--- a/arch/riscv/lib/delay.c
++++ b/arch/riscv/lib/delay.c
+@@ -73,12 +73,40 @@
+ #error "HZ > MAX_NDELAY_HZ"
+ #endif
+ 
++/*
++ * SoCLabs MPS3 / MicroBlaze-V erratum: the RISC-V `time` CSR (get_cycles())
++ * FREEZES inside a tight busy-spin loop (proven on silicon: __delay pinned with
++ * elapsed = rdtime_now - t0 stuck at 0 for >10 min, sane cycle target). This
++ * makes every udelay/ndelay/mdelay hang. The AXI timer's free-running counter
++ * (the clocksource this platform already uses in place of the broken rdtime)
++ * does NOT freeze. The platform timer driver registers a read of that counter
++ * here; __delay uses it when available and falls back to get_cycles() during
++ * early boot (before the timer probes), where short IRQs-on udelays survive.
++ * The AXI timer runs at the same frequency as riscv_timebase (both 100 MHz on
++ * this SoC), so udelay's cycle math needs no rescaling.
++ */
++static u64 (*riscv_delay_cycles)(void);
++
++void riscv_register_delay_cycles(u64 (*fn)(void))
++{
++	riscv_delay_cycles = fn;
++}
++EXPORT_SYMBOL(riscv_register_delay_cycles);
++
+ void __delay(unsigned long cycles)
+ {
+-	u64 t0 = get_cycles();
++	u64 (*read)(void) = READ_ONCE(riscv_delay_cycles);
++	u64 t0;
+ 
+-	while ((unsigned long)(get_cycles() - t0) < cycles)
+-		cpu_relax();
++	if (read) {
++		t0 = read();
++		while ((unsigned long)(read() - t0) < cycles)
++			cpu_relax();
++	} else {
++		t0 = get_cycles();
++		while ((unsigned long)(get_cycles() - t0) < cycles)
++			cpu_relax();
++	}
+ }
+ EXPORT_SYMBOL(__delay);
+ 
+--- a/arch/riscv/include/asm/delay.h
++++ b/arch/riscv/include/asm/delay.h
+@@ -17,4 +17,10 @@
+ 
+ extern void __delay(unsigned long cycles);
+ 
++/*
++ * SoCLabs MPS3/MBV: register a non-rdtime free-running counter read for
++ * __delay(), because get_cycles()/rdtime freezes in a busy-spin on this SoC.
++ */
++void riscv_register_delay_cycles(u64 (*fn)(void));
++
+ #endif /* _ASM_RISCV_DELAY_H */
+--- a/drivers/clocksource/timer-soclabs-mbv.c
++++ b/drivers/clocksource/timer-soclabs-mbv.c
+@@ -66,6 +66,7 @@
+ #include <linux/init.h>
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
++#include <linux/delay.h>	/* riscv_register_delay_cycles() */
+ #include <linux/irq.h>
+ #include <linux/of.h>
+ #include <linux/of_address.h>
+@@ -242,6 +243,17 @@
+ 	return readl(mbv_timer_base + MBV_TCR1);
+ }
+ 
++/*
++ * Busy-delay counter for arch __delay(): the same free-running TCR1 the
++ * clocksource reads. get_cycles()/rdtime freezes in a tight busy-spin on this
++ * silicon (proven on the board), hanging every udelay/ndelay/mdelay; TCR1 (a
++ * fabric counter) does not. Registered with arch after TCR1 is running.
++ */
++static u64 mbv_delay_read_cycles(void)
++{
++	return readl(mbv_timer_base + MBV_TCR1);
++}
++
+ static struct clocksource mbv_clocksource = {
+ 	.name	= "soclabs-mbv-timer-cs",
+ 	.rating	= 450,			/* > riscv_clocksource (400) */
+@@ -256,6 +268,11 @@
+ 	writel(0, mbv_timer_base + MBV_TLR1);
+ 	writel(MBV_TCSR_TINT, mbv_timer_base + MBV_TCSR1);
+ 	writel(MBV_TCSR_ENT | MBV_TCSR_ARHT, mbv_timer_base + MBV_TCSR1);
++
++	/* Route arch busy-delays (udelay/ndelay/mdelay) off the frozen rdtime
++	 * onto this free-running counter now that TCR1 is enabled. */
++	riscv_register_delay_cycles(mbv_delay_read_cycles);
++
+ 	return clocksource_register_hz(&mbv_clocksource, mbv_timer_freq);
+ }
+ 

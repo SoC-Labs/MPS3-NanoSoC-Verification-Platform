@@ -1,0 +1,533 @@
+# signals_nanosoc.yaml — the REAL DUT probe set.
+#
+# PURPOSE (retargeted 2026-07-29): this IICE is aimed at ONE open question, not
+# at a generic bus dump.
+#
+#   The M0 on mps3_01 boots and executes CONTINUOUSLY but loops before it ever
+#   prints the `EthSS Boot` banner. A previous witness tap on the CPU's AHB
+#   initiator (`cpu_0_ic_haddr` / `cpu_0_ic_htrans`) proved the core fetches from
+#   0x0 and keeps fetching — so the core is alive and this is a FIRMWARE loop.
+#   The stated next step is to LOCALISE THE LOOP PC. Sampling the CPU's fetch
+#   address IS that measurement.
+#
+# Everything below is chosen to answer "where is it looping, and why", and to
+# split the two top-level hypotheses ("it never tries to print" vs "it prints
+# and nothing comes out") in a single capture.
+#
+# This manifest must always GENERATE cleanly (`make gen` runs all three
+# generators on it), but it is NOT simulated in CI — the reference bench
+# (tests/micropython_flash_boot) is minutes-to-tens-of-minutes. INTERFACES.md §2.
+#
+# ===========================================================================
+# THE `cpu_0_ic_*` NAME IS A FALSE FRIEND — there is no separate code bus
+# ===========================================================================
+# `_ic_` does NOT mean "instruction/code". It is a nanosoc_gen wire-naming rule:
+# when an initiator's name collides with a passthrough-target prefix, the
+# internal bus-matrix wires are renamed `<prefix>_ic_<sig>` to avoid a
+# multi-driver conflict —
+#   nanosoc_gen/soc_model/backends/toplevel.py:485-504
+#     "Generate internal wires for initiators with passthrough target
+#      collisions (e.g. cpu_0_ic_haddr, cpu_0_ic_hrdata)"
+#   ... wire_name = f'{wire_prefix}_ic_{sig}'            (toplevel.py:497)
+#   nanosoc_gen/tests/TEST_PLAN.md:492  TL-23: "initiator name collides w/
+#     pt-target prefix -> `<prefix>_ic_<sig>` wires"
+# In the CURRENT regeneration those wires are spelled `i_cpu_0_*`
+# (nanosoc_ss_cpu.sv:101-111), and there is no `cpu_0_ic_*` anywhere in the tree.
+#
+# And there is no code/system split to choose between, because this is a
+# Cortex-M0, not an M3/M4: `slcorem0` exposes exactly ONE AHB-Lite master —
+#   slcorem0.v:53-63   HADDR[31:0] HTRANS[1:0] HWRITE HSIZE[2:0] HBURST[2:0]
+#                      HPROT[3:0] HWDATA[31:0] HMASTLOCK HRDATA[31:0] HREADY HRESP
+# ...connected once, at nanosoc_ss_cpu.sv:190-200, to `i_cpu_0_*`. There is no
+# second bus port. So the fetch address and the data address are the SAME 32-bit
+# net, and the only correct way to tell them apart is HPROT[0]:
+#
+#   CORTEXM0.v:105       output wire [3:0] HPROT,  // AHB protection, priv-data
+#                                                  //   or priv-inst
+#   cm0_core.v:52        output wire ctl_hprot_o,  // bus is data not instruction
+#   cm0_matrix.v:71      input  wire ctl_hprot_i,  // core data not fetch
+#   cm0_matrix.v:199     wire ahb_prot = ctl_hprot_i | dif_aphase;
+#   cm0_matrix.v:340     assign hprot_o = { ahb_c, ahb_b, 1'b1, ahb_prot };
+#
+#   => HPROT[0] == 0  OPCODE FETCH   (haddr is the fetch address ~ the PC)
+#      HPROT[0] == 1  DATA ACCESS    (or a debug-interface access, via dif_aphase)
+#      HPROT[1] == 1  always (constant privileged)
+#      HPROT[3:2]     cacheable/bufferable, decoded from the address
+#                     (cm0_matrix.v:249,252) — real logic, not constants
+#
+# THIS IS THE CHANGE THAT MAKES THE MANIFEST FIT THE INVESTIGATION. The previous
+# probe set sampled the same HADDR but had no way to separate fetches from data
+# accesses, so a trace of it could not be read as a PC history. `hprot` is the
+# one bit that turns the existing address probe into a PC trace.
+#
+# Caveat, stated once: HADDR on a fetch is the FETCH address, which on an M0
+# leads the architectural PC by the prefetch depth and is word-aligned (two
+# Thumb halfwords per beat). For localising a loop that is irrelevant — the loop
+# body appears as a repeating set of fetch addresses either way.
+#
+# ===========================================================================
+# HIERARCHY PROVENANCE — what is verified, and what is not
+# ===========================================================================
+# VERIFIED by reading the real sources (re-checked 2026-07-29 against the
+# CURRENT regeneration — `build_soc/rtl/nanosoc.sv` is stamped
+# "Generated: 2026-07-29 14:14:13", and the line numbers the previous version of
+# this file cited had already moved):
+#
+#   RM top module           fpga/rp/nanosoc/rp_nanosoc_wrapper.sv:39
+#                             module rp_nanosoc_wrapper
+#   SoC instance            rp_nanosoc_wrapper.sv:441-449  `nanosoc ... u_nanosoc`
+#   CPU subsystem           $SOCLABS_NANOSOC_SOC_DIR/build_soc/rtl/nanosoc.sv:789-809
+#                             `nanosoc_ss_cpu ... u_ss_cpu`
+#   CPU core                build_soc/rtl/nanosoc_ss_cpu.sv:174-189
+#                             `slcorem0 ... u_cpu_0`
+#   AHB port names          slcorem0.v:53-63 — UPPER CASE, and Identify paths are
+#                             case-sensitive
+#   Status ports            slcorem0.v:70 CORE_LOCKUP  (NOT `LOCKUP` — the
+#                             slcorem0 wrapper prefixes core status with CORE_;
+#                             `LOCKUP` is the name one level down, at
+#                             slcorem0_integration.v:143)
+#                           slcorem0.v:71 CORE_SYSRESETREQ
+#                           slcorem0.v:73 CORE_SLEEPING
+#   Reset out               slcorem0.v:46 SYS_HRESETn (an OUTPUT of slcorem0 —
+#                             the PRMU generates it; nanosoc_ss_cpu.sv:209
+#                             consumes it as `sys_hresetn`)
+#   Remap control           nanosoc_ss_cpu.sv:52
+#                             `sys_remap_ctrl,  // Address remap control
+#                              (bit 0 controls IMEM/bootrom overlay)`
+#                             — a port of u_ss_cpu, ONE LEVEL UP from u_cpu_0
+#   `build_soc/rtl/nanosoc.sv` is the top the RM actually synthesises — it is
+#   what `$SOCLABS_NANOSOC_SOC_DIR/pynq/filelist.tcl` read_verilog's, per
+#   rp_nanosoc_wrapper.sv's own G3 note. NOT the canonical
+#   nanosoc_arch_tech/rtl/src/nanosoc/nanosoc.sv.
+#
+#   SAMPLE CLOCK DOMAIN — verified end to end, line numbers refreshed. The AHB
+#   signals are in the `SYS_HCLK` domain, and SYS_HCLK is the same net as dut_clk
+#   through an unbroken chain of plain continuous assignments / port passthroughs:
+#     dut_clk
+#       -> nanosoc.sys_clk                                (rp_nanosoc_wrapper.sv:451)
+#       -> u_ss_systemctrl.SYS_CLK                        (nanosoc.sv:1034)
+#       -> nanosoc_clkctrl.XTAL1                          (nanosoc_ss_systemctrl.v:145)
+#       -> `assign clk = XTAL1` / `assign FCLK = clk`     (nanosoc_clkctrl.v:86,188)
+#       -> SYS_FCLK -> u_ss_cpu.sys_fclk                  (nanosoc.sv:810)
+#       -> slcorem0.SYS_FCLK -> slcorem0_prmu
+#       -> `assign SYS_HCLK = SYS_FCLK`                   (slcorem0_prmu.v:95)
+#   So sampling on dut_clk IS sampling on the AHB clock. CLKGATE_PRESENT=0 on
+#   this build, and the SYS_HCLK assign above is unconditional either way. Note
+#   nanosoc_clkctrl.v:83 gates a DIFFERENT output (`XTAL2`) on SLEEPDEEP; `clk`
+#   at :86 is ungated, so the sample clock keeps running even if the core sleeps.
+#   (Which is why `sleeping` is probed — see below.)
+#
+# ---------------------------------------------------------------------------
+# `hw:` PATH CONVENTION — SETTLED. Do not "simplify" the /u_rm/ prefix away.
+# ---------------------------------------------------------------------------
+# Two rules, both established (Stream E, 2026-07-29):
+#
+#   1. THE TOP MODULE NAME NEVER APPEARS. identify_debug_env_reference.pdf p.14:
+#      "the top-level design unit is represented by the initial '/'". So `/` IS
+#      the synthesis top's own scope, and a port of the top is just `/dut_clk`.
+#      Beware the manual's own `signals add /top/u1/reset_n` example elsewhere —
+#      `top` there is an INSTANCE name, not the top module, and reading it the
+#      other way is what produced the earlier wrong `/rp_nanosoc_wrapper/...`
+#      guess. Paths are CASE-SENSITIVE.
+#
+#   2. THE DUT IS ONE LEVEL DOWN, AT `u_rm`. There are deliberately TWO tops:
+#        rp_nanosoc_iice_core  — the SYNPLIFY/IDENTIFY top. Probes resolve
+#                                against THIS module, so `/` is its scope, and
+#                                `dut_clk` is its port
+#                                (rp_nanosoc_iice_core.sv:69). It instantiates
+#                                the RM wrapper as `u_rm`
+#                                (rp_nanosoc_iice_core.sv:122,142 — the instance
+#                                name is marked FROZEN precisely because it is
+#                                the first path element).
+#        rp_nanosoc_iice_shim  — the VIVADO-side DFX RM top. It instantiates the
+#                                core as `u_core`, and `u_core` does NOT appear
+#                                in probe paths (it is above the synthesis top).
+#      Why two tops at all: `device jtagport soft` ADDS four external ports to
+#      the synthesis top (the inserted TAP: tck/tms/tdi/tdo) rather than reusing
+#      pre-declared nets — Stream E measured an instrumented EDIF top at
+#      39 ports / 140 bits against 35 / 136 in source. The DFX partition-pin
+#      contract is exactly 35 ports, so the extra four have to be absorbed by a
+#      shim outside the synthesis top.
+#
+#   Net effect: top port -> `/dut_clk`; anything inside the DUT -> `/u_rm/...`.
+#
+# ---------------------------------------------------------------------------
+# WHAT IS NOW TOOL-CONFIRMED, AND WHAT IS STILL ONLY READ-FROM-SOURCE
+# ---------------------------------------------------------------------------
+# UPGRADED 2026-07-29. The previous version of this file said these specific
+# paths "have NOT been resolved by Identify against the real DUT" because the RM
+# could not elaborate (the `cpu_0_swd*` P0). That P0 is FIXED (commit d531dc7)
+# and a real instrumentation run has since consumed the .idc GENERATED FROM THIS
+# MANIFEST. Evidence, from the run's own log:
+#
+#   fpga/rp/nanosoc_iice/build/rev_1_identify/identify.log
+#     :36  "Instrumentor will stop execution if instrumented RTL signal is not
+#           found in design database"          <- stop_on_signal_not_found 1 ACTIVE
+#     :37  "Setting IICE sample clock to '/dut_clk' for IICE named 'IICE_CPU'"
+#     :39  "Instrument Signal /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HADDR ..."
+#     :43/47/51/55/59  HTRANS, HWRITE, HRDATA, HREADY, CORE_LOCKUP — all resolved
+#     :77-79  Sample Buffer: Depth 1024, Width 69 bits, RAM type BRAM
+#     :107 "exit status=0"
+#
+# So SIX facts are now tool-confirmed, not inferred: the `/dut_clk` clock path,
+# the `/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/` scope, upper-case port naming,
+# `CORE_LOCKUP` rather than `LOCKUP`, depth 1024 fitting in BRAM, and
+# `controller: none` mapping to Identify's "Simple Triggering".
+#
+# STILL ONLY READ-FROM-SOURCE — the SEVEN probes added by this retarget:
+#   HPROT, HWDATA, HRESP, CORE_SLEEPING, CORE_SYSRESETREQ, SYS_HRESETn
+#     — all declared ports of `slcorem0` in the SAME already-resolved scope as
+#       HADDR/HREADY/CORE_LOCKUP, so structurally identical and low risk.
+#   sys_remap_ctrl
+#     — the ONE probe in a scope that has never itself hosted a resolved probe
+#       (`/u_rm/u_nanosoc/u_ss_cpu/`, one level up). The scope demonstrably
+#       exists, since `u_cpu_0` inside it resolved; but treat this as the
+#       likeliest of the new paths to need a fix.
+# `device stop_on_signal_not_found 1` (emitted by gen_idc.py) is the safety net:
+# a stale or wrong path is a HARD ERROR at Stream E's `make synth` — board-free,
+# before any board window — never a silently shrunken probe set.
+#
+# The `sim:` paths ARE verified: tests/micropython_flash_boot/Makefile sets
+# `TOPLEVEL = micropython_flash_boot_tb`, and that module (declared at
+# micropython_flash_boot_tb.sv:31, driven through its ports by cocotb)
+# instantiates `nanosoc ... u_nanosoc` at micropython_flash_boot_tb.sv:91-95.
+# So the root scope is the TB module name.
+# NOTE the two sides are NOT the same shape and must not be "unified": the sim
+# hierarchy has no `u_rm` (the bench instantiates `nanosoc` directly, with no RM
+# wrapper and no Identify core), which is exactly why the manifest carries both
+# paths per signal instead of deriving one from the other.
+
+iice:
+  name: IICE_CPU
+  # 1024 samples = 20.48 us at 50 MHz dut_clk.
+  #
+  # DEPTH IS DELIBERATELY UNCHANGED even though there is room for far more
+  # (123.5 free BRAM tiles in the RP — IDENTIFY_IICE_DFX_PLAN.md:26 — would allow
+  # depth 8192 at this width). Three reasons:
+  #   * 1024 is the configuration every measured fact in INTERFACES.md §7 was
+  #     taken at: the captured hardware FSDB has "exactly 1024" timestamps, and
+  #     `write fsdb -range {0 1023}` is the debugger command that works.
+  #   * 20.48 us already contains HUNDREDS of iterations of any plausible spin
+  #     loop, so depth is not the binding constraint on localising one.
+  #   * The placed/routed/pr_verify'd bitstream was built at 1024. Widening the
+  #     probe set already forces a Stream E rebuild; changing depth as well would
+  #     move two variables at once.
+  # If a capture shows a monotonic address ramp rather than a repeat, the loop is
+  # longer than the window and THEN depth is the thing to raise.
+  depth: 1024
+  #
+  # trigger_time: EARLY — window = the trigger sample plus the 1023 samples AFTER
+  # it (crop_trace.py:363-374 / its module docstring: early => offset 0, 0
+  # pre-trigger, D-1 post-trigger).
+  #
+  # This follows from the trigger choice below being an ARM-AND-GO trigger. A
+  # trigger that fires within a cycle or two of `run` has no pre-trigger history
+  # to show: with `middle` or `late` the pre-trigger half of the buffer would be
+  # whatever was in the BRAM before arming, i.e. 512 or 1023 samples of garbage
+  # presented as data. `early` makes every sample in the window real.
+  #
+  # REMEMBER (INTERFACES.md §7): `-triggertime` is a DEBUGGER-side option, not an
+  # instrumentor one, so gen_idc.py must NOT and does NOT emit it. This value
+  # drives (a) the offline cropper on the SIM side and (b) what the operator must
+  # pass in the debugger. If those two disagree the windows silently misalign.
+  trigger_time: early
+  #
+  # `none` = Identify "Simple Triggering" (confirmed: identify.log:83-84 for the
+  # previous run of this manifest). The IICE ANDs the per-signal watch conditions
+  # of the `-trigger` signals.
+  # IICE_SIM_VS_HW_TRACE_PLAN.md §6 V3 says keep the FIRST real IICE simple
+  # (`none`, or a 2-condition/2-state SM) with no compression, no qualified
+  # sampling and no always-armed — features are mutually exclusive in Identify
+  # anyway. Note that rules out the literal "always-armed" feature, so the
+  # arm-and-go effect is obtained from a near-always-true CONDITION instead
+  # (see `trigger.expr`).
+  #
+  # CONSEQUENCE for `trigger.expr` below: with `none`, the expression must stay a
+  # pure CONJUNCTION of per-signal conditions, because that is all simple
+  # triggering can express. An `||` here would be honoured by the sim shadow and
+  # silently mistranslated on the hardware side. Switch `controller` to
+  # `statemachine` before writing anything that is not an AND-chain.
+  controller: none
+  # Inert with `controller: none` (gen_idc.py only emits -triggerconditions /
+  # -triggerstates for `statemachine`), but the schema requires them. Kept at the
+  # minimum: each extra condition DOUBLES the trigger RAM, and INTERFACES.md §7
+  # notes only 2/4/8 states are worth using.
+  trigger_conditions: 1
+  trigger_states: 2
+  clock:
+    hw:   /dut_clk                              # port of the synthesis top: no prefix
+    sim:  micropython_flash_boot_tb.dut_clk
+    edge: positive
+
+signals:
+  # =========================================================================
+  # THE MEASUREMENT: the PC.
+  # =========================================================================
+  # The CPU's single AHB-Lite master address. When hprot[0]==0 this is the
+  # instruction-fetch address, i.e. effectively the PC — the whole point of the
+  # capture. When hprot[0]==1 it is the data address, which is why hprot is
+  # sampled beside it rather than a second address probe being added: on an M0
+  # there is only one address bus, so "the data-bus address" is this same net
+  # selected by hprot[0].
+  - name:    haddr
+    width:   32
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HADDR
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HADDR
+    sample:  true
+    trigger: false
+    radix:   hex
+
+  # HTRANS: 00 IDLE, 01 BUSY, 10 NONSEQ, 11 SEQ. Two jobs here:
+  #   * tells a real transfer from IDLE, so an idle core is not misread as a
+  #     stalled fetch;
+  #   * NONSEQ vs SEQ separates a BRANCH TARGET from straight-line prefetch —
+  #     which is precisely how a loop shows itself. A backward branch is a NONSEQ
+  #     at the loop head; everything between is SEQ.
+  # This is also the ONLY trigger signal (see trigger.expr), so it is the only
+  # one costing trigger RAM: 2 bits, down from 35 in the previous probe set
+  # (identify.log:59-63 reported "Sample and trigger 35").
+  - name:    htrans
+    width:   2
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HTRANS
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HTRANS
+    sample:  true
+    trigger: true
+    radix:   bin
+
+  # HPROT[0]: 0 = OPCODE FETCH, 1 = DATA ACCESS (cm0_matrix.v:71,199,340 and
+  # cm0_core.v:52 — see the header). Without this bit a trace of `haddr` is an
+  # interleaving of PC values and operand addresses with no way to tell which is
+  # which, and "localise the loop PC" is not answerable from it. Sampled as the
+  # whole 4-bit vector rather than a bit-select because a bit-selected Identify
+  # probe path is an untested convention here and the other 3 bits cost nothing:
+  # [1] is a constant 1, [3:2] are address-derived cacheable/bufferable
+  # (cm0_matrix.v:249,252).
+  # radix bin so bit 0 is readable at a glance.
+  - name:    hprot
+    width:   4
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HPROT
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HPROT
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  # HREADY: without it a wait-stated transfer looks like the same address being
+  # fetched over and over — i.e. it would fake exactly the signature we are
+  # hunting. Any address-repeat analysis MUST qualify on hready==1.
+  - name:    hready
+    width:   1
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HREADY
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HREADY
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  - name:    hwrite
+    width:   1
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HWRITE
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HWRITE
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  # HRESP (1 bit on this core — slcorem0.v:63): an AHB ERROR response is what
+  # turns into a HardFault, and "spinning in the HardFault handler" is one of the
+  # few loop causes that is invisible in the address stream alone unless you
+  # already know where the handler is.
+  - name:    hresp
+    width:   1
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HRESP
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HRESP
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  # HRDATA does double duty and is worth its 32 bits twice over:
+  #   * on a FETCH beat it is the INSTRUCTION WORD at the PC, so the loop body
+  #     can be disassembled straight out of the trace — no dependency on having
+  #     the right .elf/.map to hand, and it catches the case where the fetched
+  #     bytes are NOT what the image says they should be;
+  #   * on a DATA READ it is the value read — which is the direct witness for the
+  #     single most likely cause of "loops before printing": polling a UART
+  #     status bit that never becomes ready.
+  - name:    hrdata
+    width:   32
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HRDATA
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HRDATA
+    sample:  true
+    trigger: false
+    radix:   hex
+
+  # HWDATA splits the two TOP-LEVEL hypotheses about the missing banner:
+  #   "the firmware never gets as far as printing"  vs
+  #   "the firmware does print and the console path swallows it".
+  # If the trace shows writes of 'E','t','h','S','S' to the UART data register,
+  # the CPU is not the fault and the investigation moves to the UART/console
+  # path. Nothing else in the probe set can distinguish those two.
+  - name:    hwdata
+    width:   32
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HWDATA
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.HWDATA
+    sample:  true
+    trigger: false
+    radix:   hex
+
+  # CORE_LOCKUP, not LOCKUP — slcorem0.v:70. Kept from the previous probe set.
+  # This is the one signal the RM boundary CANNOT give us: rp_nanosoc_wrapper
+  # ties dut_lockup to 1'b0 because nanosoc.sv never routes cpu_0_lockup to a
+  # top-level port (see its A6-gap note), so an IICE probe one level down is the
+  # only way to see it on silicon. That is precisely what this harness is for.
+  # Expected LOW (the core is reported as not faulting) — which is exactly why it
+  # must be SAMPLED and must not be the trigger.
+  - name:    lockup
+    width:   1
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/CORE_LOCKUP
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.CORE_LOCKUP
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  # CORE_SLEEPING (slcorem0.v:73): separates a BUSY spin loop from a WFI/WFE park
+  # waiting on an event that never arrives. Those look identical from the console
+  # (nothing prints) and nearly identical in the address stream (HTRANS goes
+  # IDLE), but they have completely different fixes. Cheap at 1 bit.
+  # Note the sample clock is NOT gated by sleep (nanosoc_clkctrl.v:86), so the
+  # IICE keeps sampling through a sleep and this bit stays meaningful.
+  - name:    sleeping
+    width:   1
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/CORE_SLEEPING
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.CORE_SLEEPING
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  # CORE_SYSRESETREQ (slcorem0.v:71) + SYS_HRESETn (slcorem0.v:46, a PRMU OUTPUT)
+  # together answer a question the address stream alone CANNOT: is this a
+  # software loop, or is the part RESETTING repeatedly? A reset loop also
+  # "fetches from 0x0 continuously" and also never reaches the banner — it is
+  # indistinguishable from a spin loop on `haddr` alone. 2 bits to rule it in or
+  # out.
+  - name:    sysresetreq
+    width:   1
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/CORE_SYSRESETREQ
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.CORE_SYSRESETREQ
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  - name:    hresetn
+    width:   1
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/SYS_HRESETn
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.u_cpu_0.SYS_HRESETn
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  # sys_remap_ctrl[0] — "bit 0 controls IMEM/bootrom overlay"
+  # (nanosoc_ss_cpu.sv:52). This DISAMBIGUATES LOW PC VALUES, which is the single
+  # most likely place a capture would be misread: a fetch at 0x0000_00xx is the
+  # BOOTROM before REMAP and the IMEM after it, so "stuck in the bootloader" and
+  # "stuck in the application" produce the same addresses. Without this bit the
+  # trace cannot tell them apart.
+  #
+  # NOTE the path is one level UP, at u_ss_cpu, not inside u_cpu_0 — it is a port
+  # of the CPU subsystem, not of the core. This is the only probe here whose
+  # scope has not itself hosted an Identify-resolved probe (see the provenance
+  # section above); Stream E's `make synth` with stop_on_signal_not_found 1 is
+  # the board-free gate that will say so if it is wrong.
+  - name:    remap_ctrl
+    width:   4
+    hw:      /u_rm/u_nanosoc/u_ss_cpu/sys_remap_ctrl
+    sim:     micropython_flash_boot_tb.u_nanosoc.u_ss_cpu.sys_remap_ctrl
+    sample:  true
+    trigger: false
+    radix:   bin
+
+  # SAMPLE BUFFER: 13 signals = 32+2+4+1+1+1+32+32+1+1+1+1+4 = 113 bits x 1024.
+  # Previous set was 69 bits (identify.log:79, "Width 69 bits") at 2 BRAM /
+  # +237 LUT. 113 bits needs 4 RAMB36-equivalents (115,712 of 147,456 bits)
+  # against 123.5 FREE BRAM tiles and 32,750 free LUTs in the RP
+  # (IDENTIFY_IICE_DFX_PLAN.md:26,82) — i.e. +2 BRAM on a budget with ~120 spare.
+  # The expensive resource in an IICE is the TRIGGER comparator, and that went
+  # DOWN: one 2-bit trigger signal instead of three totalling 35 bits.
+
+trigger:
+  # ==========================================================================
+  # ARM-AND-GO. Reasoned choice, not a default — the three candidates were:
+  # ==========================================================================
+  # (a) trigger on `lockup`. REJECTED: the core is reported as NOT faulting, so
+  #     this would never fire. A trigger that never fires yields NO DATA AT ALL,
+  #     which is the worst possible outcome when the scarce resource is a board
+  #     window. Same objection kills triggering on `hresp` (bus error) or
+  #     `sysresetreq`: each presumes a specific cause and returns nothing if the
+  #     cause is wrong. They are all SAMPLED instead, so one capture tests every
+  #     one of those hypotheses at once.
+  #
+  # (b) trigger on a fetch OUTSIDE the expected boot range. REJECTED: it presumes
+  #     a runaway, and the witness tap already contradicts that — the core
+  #     fetches from 0x0, which is IN range. Also unwritable in practice: the
+  #     "expected range" is a comparison Simple Triggering cannot express (it
+  #     compares masked values, not magnitudes).
+  #
+  # (c) THIS. Fire on the first ACTIVE AHB transfer after arming, i.e. within a
+  #     cycle or two of `run`. Chosen because THE LOOP IS ENDLESS, so ANY window
+  #     contains it: a loop repeating every N < 1024 samples appears as a
+  #     repeating address pattern no matter where the window starts, and a loop
+  #     longer than the window appears as a monotonic address ramp, which is
+  #     itself the answer ("not a tight spin — here is the PC range").
+  #     This needs NO prior knowledge of the loop address, which is the whole
+  #     problem: we cannot trigger on an address we do not know yet.
+  #     The plan (§6 V3) forbids Identify's literal `always_armed` FEATURE, so
+  #     the same effect is obtained from a near-always-true CONDITION.
+  #
+  # WHY htrans[1] AND NOT htrans == 2'b10: HTRANS[1] is set for both NONSEQ (10)
+  # and SEQ (11) and clear for IDLE (00) and BUSY (01), so `htrans[1]` is "any
+  # active transfer" — a strict superset of NONSEQ, therefore strictly more
+  # likely to fire. Cost: the hardware watch value needs a don't-care bit.
+  #   Debugger side (Stream D). THE FORM BELOW IS WRONG -- MEASURED 2026-07-30,
+  #   kept only so nobody re-derives it from this file and loses a board window:
+  #     watch -iice IICE_CPU {/u_rm/u_nanosoc/u_ss_cpu/u_cpu_0/HTRANS} {1x}
+  #   On T-2022.09-SP2 the debugger rejects `-iice` ("Invalid argument on command
+  #   line: -iice") and rejects every positional argument in every variant tried
+  #   (`watch <sig> <mask>`, `watch <sig> 0x378`, `watch add ...`,
+  #   `watch -signal ... -value ...`, `watch -show`). `watch -h` prints nothing;
+  #   `info commands` does list `watch`/`watch_impl`; the shape is in none of the
+  #   shipped PDFs or lib/*.txt. The runtime trigger syntax is UNRESOLVED.
+  #   Known-working route: the GUI (`identify_debugger`) -- click the signal and
+  #   type the value. Batch seam: host/identify/debug_session.tcl's
+  #   IICE_WATCH_CMD, which takes a full command once the syntax is known.
+  #   Both silicon captures so far therefore ran ARM-AND-GO (DI156 auto-trigger),
+  #   which is what this manifest asks for anyway.
+  #   If masked watch values turn out to be awkward, `{10}` (NONSEQ only) is the
+  #   drop-in fallback: a loop must branch backwards, and the fetch after a
+  #   branch is NONSEQ, so NONSEQ still occurs at least once per iteration.
+  #
+  # RESIDUAL RISK, stated rather than hidden: if the core happened to be parked
+  # in WFI/WFE at arming time, HTRANS stays IDLE and this never fires. The
+  # witness tap makes that unlikely (`fc` SATURATED = continuous fetching), and
+  # if it DID happen the absence of a trigger is itself the finding — at which
+  # point re-run with `controller: statemachine` and two conditions OR'd
+  # (htrans[1] OR sleeping).
+  #
+  # ==========================================================================
+  # HONEST SCOPE: this makes signals_nanosoc.yaml a HARDWARE-LOCALISATION
+  # manifest, not a sim-vs-hardware equivalence manifest.
+  # ==========================================================================
+  # An arm-and-go trigger fires at an ARBITRARY point in execution on hardware,
+  # but at the FIRST fetch after reset in a simulation — so the two windows are
+  # not phase-aligned and a `compare.sh` run over them would report mismatches
+  # that mean nothing. That is fine and intended: INTERFACES.md §2 makes
+  # `signals_selftest.yaml` the CI compare gate, and the two firmware loads are
+  # different anyway (this bench boots MicroPython from flash; the board runs the
+  # EthSS image). Do not read a red compare on THIS manifest as a harness fault.
+  #
+  # THE FOLLOW-UP CAPTURE, which is where the compare becomes meaningful: once
+  # capture #1 yields a loop PC, set
+  #     expr: "htrans[1] == 1'b1 && haddr == 32'h<loop_pc>"
+  # (add `trigger: true` to haddr) and `trigger_time: late`, and the window
+  # becomes the 1023 samples that LED INTO the loop — with both sides triggered
+  # on the same architectural event.
+  #
+  # Pure AND-chain (a single condition on a single signal): required by
+  # `controller: none`, see the note on it above.
+  expr: "htrans[1] == 1'b1"

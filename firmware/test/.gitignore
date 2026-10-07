@@ -1,0 +1,6 @@
+# `make test` links + runs the test binaries in a private per-invocation
+# .testrun.* dir (see Makefile "Build isolation") so two builds overlapping in
+# this shared tree cannot clobber each other. A hard kill can leave one behind;
+# ignore them rather than have `clean` glob-sweep sibling dirs (that would
+# reintroduce the race). (bin/ is already ignored at the repo root.)
+.testrun.*/

@@ -1,0 +1,231 @@
+#!/bin/sh
+#
+# S12mps3persist — settle /persist, the SSH host key and the claimed keys
+# before anything that needs them starts (network S41, dropbear S50, harnessd
+# via inittab). Runs after S11modules has loaded spi-usd.ko.
+# Contract: docs/planning/linux_lanes/IMAGE_CONTRACT.md §3 and §4.
+#
+# WHERE /persist COMES FROM (IMAGE_CONTRACT §3.1)
+#   1. cmdline mps3.persist=off -> tmpfs; mps3.persist=/dev/X -> that device
+#   2. the user microSD: only if the usd block reports a card present do we
+#      wait (bounded) for /dev/mmcblk0. NO CARD => NO WAIT, NO ERROR — D13's
+#      hard rule: with no card the board boots exactly as without the feature.
+#      (QEMU names its stand-in disk with mps3.persist_disk=/dev/vda.)
+#   3. BY POSITION AND TYPE, never by guessing (STAGE0_CONTRACT §6): the card's
+#      MBR must carry the harness layout — entries 1 and 2 type 0x7F (stage0
+#      slots A/B), entry 3 type 0x83 — and /persist is partition 3, which must
+#      already hold ext4. A foreign card is never touched.
+#   4. NOTHING IS EVER FORMATTED AUTOMATICALLY. A harness card whose p3 is blank
+#      boots with a tmpfs /persist (reason=unformatted) until someone runs
+#      `mps3-persist format --erase`.
+#   5. otherwise a small tmpfs at the same path, so every consumer sees the
+#      same paths either way — a claim or a resident clearing written there
+#      simply does not survive the reboot.
+#
+# HOST KEY (DL5 as amended 2026-09-23): generated per board on first boot into
+# /persist/dropbear (bind-mounted on /etc/dropbear); a fresh one every boot
+# with no card. Only ed25519. A LAB image's baked key seeds /persist once.
+
+PERSIST=/persist
+RUN=/run/mps3
+STATE=$RUN/persist.state
+CARD_WAIT=8               # s: card present -> /dev/mmcblk0 must appear
+LABEL=mps3-persist
+HOSTKEY=/etc/dropbear/dropbear_ed25519_host_key
+IMAGE_OWNED_LIST=/usr/share/mps3/image-owned.list
+
+log() { echo "mps3persist: $*"; }
+
+cmdline_arg() {
+    for a in $(cat /proc/cmdline 2>/dev/null); do
+        case "$a" in "$1="*) echo "${a#*=}"; return 0 ;; esac
+    done
+    return 1
+}
+
+card_present() {
+    for f in /sys/bus/platform/drivers/spi-usd/*/card_present; do
+        [ -r "$f" ] && [ "$(cat "$f" 2>/dev/null)" = 1 ] && return 0
+    done
+    return 1
+}
+
+part() {   # part DISK N -> the partition node (mmcblk0 -> mmcblk0p3, vda -> vda3)
+    case "$1" in *[0-9]) echo "${1}p$2" ;; *) echo "$1$2" ;; esac
+}
+
+mbr_byte() {   # mbr_byte DISK OFFSET -> two lowercase hex digits
+    dd if="$1" bs=1 skip="$2" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'
+}
+
+# The ext2/3/4 superblock magic 0xEF53 at byte 1080 of the partition. Read
+# directly: Buildroot's BusyBox blkid is built without FEATURE_BLKID_TYPE, so it
+# never prints TYPE= (found by the QEMU proof, 2026-09-23).
+is_ext() {
+    [ "$(dd if="$1" bs=1 skip=1080 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')" = 53ef ]
+}
+
+is_blank() {   # the first 8 KiB (boot block + superblock area) all zero
+    [ "$(dd if="$1" bs=4096 count=2 2>/dev/null | tr -d '\000' | wc -c)" -eq 0 ]
+}
+
+card_p3() {   # card_p3 DISK -> echo p3 when DISK carries the harness MBR layout
+    disk=$1
+    [ "$(mbr_byte "$disk" 510)$(mbr_byte "$disk" 511)" = 55aa ] || return 1
+    [ "$(mbr_byte "$disk" 450)" = 7f ] && [ "$(mbr_byte "$disk" 466)" = 7f ] && \
+        [ "$(mbr_byte "$disk" 482)" = 83 ] || return 1
+    p3=$(part "$disk" 3)
+    [ -b "$p3" ] || return 1
+    echo "$p3"
+}
+
+mount_tmpfs() {
+    mount -t tmpfs -o mode=0755,size=16m mps3-persist "$PERSIST" && \
+        BACKING="backing=tmpfs reason=$1"
+}
+
+settle_persist() {
+    mkdir -p "$PERSIST" "$RUN"
+    STORAGE=ok
+    dev=""
+    arg=$(cmdline_arg mps3.persist)
+    case "$arg" in
+        off)  mount_tmpfs cmdline; return ;;
+        /dev/*) dev=$arg ;;
+    esac
+    disk=""
+    reason=no-card
+    if [ -z "$dev" ]; then
+        disk=$(cmdline_arg mps3.persist_disk) || disk=""
+        if [ -z "$disk" ] && card_present; then
+            disk=/dev/mmcblk0
+            i=0
+            while [ ! -b $disk ] && [ $i -lt $((CARD_WAIT * 5)) ]; do
+                sleep 0.2; i=$((i + 1))
+            done
+            if [ -b $disk ]; then
+                sleep 0.3               # let the partition scan land
+            else
+                STORAGE=failed
+                reason=storage-path-failed
+                log "card present but $disk never appeared (${CARD_WAIT}s) — the uSD driver path is broken"
+            fi
+        fi
+        if [ -n "$disk" ] && [ -b "$disk" ]; then
+            if p3=$(card_p3 "$disk"); then
+                if is_ext "$p3"; then
+                    dev=$p3
+                elif ! is_blank "$p3"; then
+                    reason=p3-not-ext4
+                    log "$p3 holds something that is not ext2/3/4 — left alone"
+                else
+                    reason=unformatted
+                    log "$p3 is blank: /persist stays volatile until 'mps3-persist format --erase'"
+                fi
+            else
+                reason=foreign-card
+                log "$disk does not carry the harness layout (STAGE0_CONTRACT §6) — not touched"
+            fi
+        fi
+    fi
+    if [ -z "$dev" ]; then
+        mount_tmpfs "$reason"
+        return
+    fi
+    if command -v e2fsck >/dev/null 2>&1; then
+        e2fsck -p "$dev" >/dev/null 2>&1
+        rc=$?
+        if [ $rc -ge 4 ]; then
+            log "e2fsck $dev rc=$rc — not mounting it"
+            mount_tmpfs fsck-failed
+            return
+        fi
+    fi
+    if mount -t ext4 -o noatime,errors=remount-ro "$dev" "$PERSIST"; then
+        BACKING="backing=card dev=$dev"
+    else
+        log "mount $dev failed"
+        mount_tmpfs mount-failed
+    fi
+}
+
+layout() {
+    [ -f "$PERSIST/.layout" ] || echo "mps3-persist 1" > "$PERSIST/.layout"
+    mkdir -p "$PERSIST/dropbear" "$PERSIST/ssh" "$PERSIST/mps3" \
+             "$PERSIST/etc-mps3/upper" "$PERSIST/etc-mps3/work"
+    chmod 0700 "$PERSIST/dropbear" "$PERSIST/ssh"
+}
+
+host_key() {
+    # Buildroot ships /etc/dropbear as a symlink into /var/run; a lab image
+    # (L0 seam) ships a real dir holding a baked key.
+    if [ -L /etc/dropbear ]; then
+        rm -f /etc/dropbear
+    fi
+    mkdir -p /etc/dropbear
+    img=/etc/dropbear/dropbear_ed25519_host_key
+    per=$PERSIST/dropbear/dropbear_ed25519_host_key
+    if [ -s "$img" ] && [ ! -s "$per" ]; then
+        cp -p "$img" "$per" && log "seeded /persist with the image's baked host key (lab image)"
+    elif [ -s "$img" ] && ! cmp -s "$img" "$per"; then
+        log "WARNING: persisted host key differs from the image's baked one — using the persisted key"
+    fi
+    mountpoint -q /etc/dropbear || mount --bind "$PERSIST/dropbear" /etc/dropbear
+    # ONE dropbearkey run per boot: generating prints the same "Public key
+    # portion is:" / key / "Fingerprint:" block that -y prints (dropbearkey.c
+    # printpubfile after signkey_generate), so -y runs only for a key that was
+    # already there. The second run cost ~0.4 s in QEMU, ~1 s on the MBV, on the
+    # path to harnessd's first WDOG kick (BOOT lane, 2026-09-24).
+    if [ ! -s "$HOSTKEY" ]; then
+        rm -f "$HOSTKEY.pub"      # dropbearkey writes it O_EXCL; this script rewrites it below
+        out=$(dropbearkey -t ed25519 -f "$HOSTKEY" 2>/dev/null) \
+            && log "generated this board's ed25519 host key" \
+            || log "ERROR: dropbearkey failed"
+    else
+        out=$(dropbearkey -y -f "$HOSTKEY" 2>/dev/null)
+    fi
+    chmod 0600 "$HOSTKEY" 2>/dev/null
+    mkdir -p "$RUN/ssh"
+    echo "$out" | grep '^ssh-ed25519 ' > "$HOSTKEY.pub"
+    echo "$out" | sed -n 's/^Fingerprint: //p' > "$RUN/ssh/host_key_sha256"
+    log "host key $(cat "$RUN/ssh/host_key_sha256")"
+}
+
+etc_mps3() {
+    case "$BACKING" in backing=card*) ;; *) return ;; esac
+    up=$PERSIST/etc-mps3/upper
+    # image-owned files always come from the image (a new image's static_id,
+    # version and greybox clearing must win over any persisted copy)
+    for f in version static_id greybox_clear.bin $(grep -v '^#' "$IMAGE_OWNED_LIST" 2>/dev/null); do
+        [ -e "$up/$f" ] || [ -c "$up/$f" ] || continue
+        rm -f "$up/$f" && log "discarded persisted /etc/mps3/$f (image-owned)"
+    done
+    mountpoint -q /etc/mps3 || mount -t overlay overlay \
+        -o "lowerdir=/etc/mps3,upperdir=$up,workdir=$PERSIST/etc-mps3/work" /etc/mps3 \
+        || log "overlay on /etc/mps3 failed — /etc/mps3 edits will not persist"
+}
+
+case "$1" in
+    start)
+        BACKING=""
+        settle_persist
+        [ -n "$BACKING" ] || BACKING="backing=none reason=tmpfs-failed"
+        layout
+        host_key
+        etc_mps3
+        /usr/sbin/mps3-keys-sync
+        echo "$BACKING storage=$STORAGE" > "$STATE"
+        log "$BACKING"
+        ;;
+    stop)
+        sync
+        mountpoint -q /etc/mps3 && umount /etc/mps3
+        mountpoint -q /etc/dropbear && umount /etc/dropbear
+        mountpoint -q "$PERSIST" && mount -o remount,ro "$PERSIST"
+        ;;
+    *)
+        echo "Usage: $0 {start|stop}"
+        exit 1
+        ;;
+esac
+exit 0

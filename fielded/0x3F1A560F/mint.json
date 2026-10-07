@@ -1,0 +1,543 @@
+{
+  "artefacts": [
+    {
+      "bytes": 11123392,
+      "md5": "1f9b6c24dba24a55d97fa435f421fe54",
+      "mtime": "2026-09-15T19:33:18Z",
+      "name": "config_rm_greybox.bin"
+    },
+    {
+      "bytes": 11123518,
+      "md5": "aa36ad9978cfb834aacfd67a88cf58f7",
+      "mtime": "2026-09-15T19:33:18Z",
+      "name": "config_rm_greybox.bit"
+    },
+    {
+      "bytes": 74675,
+      "md5": "6c6c9761d6168aa6f9cfcb1934aaa4c3",
+      "mtime": "2026-09-15T19:52:19Z",
+      "name": "config_rm_greybox.mmi"
+    },
+    {
+      "bytes": 12041006,
+      "md5": "bf39fabcfacd564f2b28f796a58de3e0",
+      "mtime": "2026-09-16T09:32:55Z",
+      "name": "config_rm_greybox_fw.bit"
+    },
+    {
+      "bytes": 1137649,
+      "md5": "424b487905844791c1b0838ce11f2a48",
+      "mtime": "2026-09-15T14:10:14Z",
+      "name": "shell_harness.xsa"
+    }
+  ],
+  "build_dir": "fpga/dfx/build_mint_2026_09/prod",
+  "dcps": [
+    {
+      "bytes": 11602102,
+      "md5": "ff04de79faaa9cfe832076f1756e3bb6",
+      "mtime": "2026-09-15T19:24:12Z",
+      "name": "config_rm_clcd_demo_routed.dcp"
+    },
+    {
+      "bytes": 12862133,
+      "md5": "af1fae4f982e1895031a01c8ed4c9060",
+      "mtime": "2026-09-15T18:25:24Z",
+      "name": "config_rm_eth_ss_routed.dcp"
+    },
+    {
+      "bytes": 10812075,
+      "md5": "995a9bc682b10080b25204d123aa0402",
+      "mtime": "2026-09-15T17:13:14Z",
+      "name": "config_rm_greybox_routed.dcp"
+    },
+    {
+      "bytes": 11435941,
+      "md5": "747ba9e937792d438d88499553f13b07",
+      "mtime": "2026-09-15T17:49:28Z",
+      "name": "config_rm_led_routed.dcp"
+    },
+    {
+      "bytes": 32489364,
+      "md5": "8d8f4e884ac9a811d8ac559557db19f2",
+      "mtime": "2026-09-15T18:49:50Z",
+      "name": "config_rm_nanosoc_multicore_routed.dcp"
+    },
+    {
+      "bytes": 19198333,
+      "md5": "b2f63028263ddfe063eb20c017be87dd",
+      "mtime": "2026-09-15T18:14:21Z",
+      "name": "config_rm_nanosoc_routed.dcp"
+    },
+    {
+      "bytes": 19445098,
+      "md5": "5392dec1c27dd814c0a79fb82d6e99e4",
+      "mtime": "2026-09-15T19:13:58Z",
+      "name": "config_rm_nanosoc_upy_routed.dcp"
+    },
+    {
+      "bytes": 11400650,
+      "md5": "3af622467b2c93e765f619928c41875a",
+      "mtime": "2026-09-15T17:25:39Z",
+      "name": "config_rm_regdemo_a_routed.dcp"
+    },
+    {
+      "bytes": 11402508,
+      "md5": "11e6ab1f1c3bdbb9a3581abbab398a22",
+      "mtime": "2026-09-15T17:38:28Z",
+      "name": "config_rm_regdemo_b_routed.dcp"
+    },
+    {
+      "bytes": 14010571,
+      "md5": "c170c841619669ba0c792aa4559f735d",
+      "mtime": "2026-09-15T19:00:57Z",
+      "name": "config_rm_socscope_routed.dcp"
+    },
+    {
+      "bytes": 11613097,
+      "md5": "d3a2c63511fbdac3902929ea45879a85",
+      "mtime": "2026-09-15T18:00:48Z",
+      "name": "config_rm_uart_echo_routed.dcp"
+    },
+    {
+      "bytes": 111529,
+      "md5": "5797931e3879fda2f48b698820e8caf6",
+      "mtime": "2026-09-15T15:06:12Z",
+      "name": "rm_clcd_demo_synth.dcp"
+    },
+    {
+      "bytes": 823801,
+      "md5": "a902e2d02b7675228ba2044e11376341",
+      "mtime": "2026-09-15T14:49:11Z",
+      "name": "rm_eth_ss_synth.dcp"
+    },
+    {
+      "bytes": 9095,
+      "md5": "52e75a608013dd2040494c3b8a936310",
+      "mtime": "2026-09-15T15:07:07Z",
+      "name": "rm_greybox_synth.dcp"
+    },
+    {
+      "bytes": 121713,
+      "md5": "a2cceb5630a83acb4292210cbfd3fd00",
+      "mtime": "2026-09-15T15:39:55Z",
+      "name": "rm_led_synth.dcp"
+    },
+    {
+      "bytes": 11994691,
+      "md5": "464901734c4d9384ff9e011982d16f8d",
+      "mtime": "2026-09-15T14:55:35Z",
+      "name": "rm_nanosoc_multicore_synth.dcp"
+    },
+    {
+      "bytes": 4434846,
+      "md5": "3814e8bfd24f5bc4b405bf66d6a61d68",
+      "mtime": "2026-09-15T14:47:04Z",
+      "name": "rm_nanosoc_synth.dcp"
+    },
+    {
+      "bytes": 4584533,
+      "md5": "b9539009f5a6f2e2d781bd6bb7fbcabf",
+      "mtime": "2026-09-15T15:04:34Z",
+      "name": "rm_nanosoc_upy_synth.dcp"
+    },
+    {
+      "bytes": 114622,
+      "md5": "91ec2c454a4ec42ac9eadf22804efde3",
+      "mtime": "2026-09-15T15:18:54Z",
+      "name": "rm_regdemo_a_synth.dcp"
+    },
+    {
+      "bytes": 114627,
+      "md5": "7adb62d4f02cdf31cc4d388c5dfb88e7",
+      "mtime": "2026-09-15T15:29:29Z",
+      "name": "rm_regdemo_b_synth.dcp"
+    },
+    {
+      "bytes": 1167874,
+      "md5": "4b49267198598aa863a475e8d87f70ec",
+      "mtime": "2026-09-15T14:55:36Z",
+      "name": "rm_socscope_synth.dcp"
+    },
+    {
+      "bytes": 174513,
+      "md5": "807a6abb5a6b0bc6477e306746fb1611",
+      "mtime": "2026-09-15T17:50:05Z",
+      "name": "rm_uart_echo_synth.dcp"
+    },
+    {
+      "bytes": 10027747,
+      "md5": "b06db74662e648c5e5515498634c0a9c",
+      "mtime": "2026-09-15T17:13:57Z",
+      "name": "static_routed_locked.dcp"
+    },
+    {
+      "bytes": 5671453,
+      "md5": "d13c73346bdd594866040e93c2c00f05",
+      "mtime": "2026-09-15T13:50:00Z",
+      "name": "shell_static_synth.dcp"
+    }
+  ],
+  "firmware": {
+    "elf": {
+      "reason": null,
+      "value": {
+        "bytes": 815456,
+        "md5": "852477c796f9e10fc1be980af5d13d53",
+        "name": "shell_fw.elf"
+      }
+    },
+    "flags": {
+      "reason": null,
+      "value": {
+        "CLCD": "1",
+        "CLCD_KVM": "1",
+        "DUT_EGRESS": "1",
+        "HWICAP_FIFO": "1",
+        "PRODUCT": "1",
+        "TOUCH": "1",
+        "WINDOWED": "1"
+      }
+    },
+    "product": {
+      "reason": null,
+      "value": true
+    }
+  },
+  "generated_at": "2026-09-16T09:33:01Z",
+  "generated_by": "fpga/dfx/tools/mint_record.py",
+  "integrity": {},
+  "overlay_inputs": [
+    {
+      "clearing": "config_rm_greybox_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_greybox_pblock_rp_dut_partial.bin",
+      "rm_id": "0x00000000",
+      "rm_key": "rm_greybox",
+      "rm_name": "greybox"
+    },
+    {
+      "clearing": "config_rm_regdemo_a_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_regdemo_a_pblock_rp_dut_partial.bin",
+      "rm_id": "0x010000A1",
+      "rm_key": "rm_regdemo_a",
+      "rm_name": "regdemo_a"
+    },
+    {
+      "clearing": "config_rm_regdemo_b_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_regdemo_b_pblock_rp_dut_partial.bin",
+      "rm_id": "0x010000B2",
+      "rm_key": "rm_regdemo_b",
+      "rm_name": "regdemo_b"
+    },
+    {
+      "clearing": "config_rm_led_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_led_pblock_rp_dut_partial.bin",
+      "rm_id": "0x0100001E",
+      "rm_key": "rm_led",
+      "rm_name": "led"
+    },
+    {
+      "clearing": "config_rm_uart_echo_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_uart_echo_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000004",
+      "rm_key": "rm_uart_echo",
+      "rm_name": "uart_echo"
+    },
+    {
+      "clearing": "config_rm_nanosoc_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_nanosoc_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000001",
+      "rm_key": "rm_nanosoc",
+      "rm_name": "nanosoc"
+    },
+    {
+      "clearing": "config_rm_eth_ss_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_eth_ss_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000002",
+      "rm_key": "rm_eth_ss",
+      "rm_name": "eth_ss"
+    },
+    {
+      "clearing": "config_rm_nanosoc_multicore_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_nanosoc_multicore_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000003",
+      "rm_key": "rm_nanosoc_multicore",
+      "rm_name": "nanosoc_multicore"
+    },
+    {
+      "clearing": "config_rm_socscope_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_socscope_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000006",
+      "rm_key": "rm_socscope",
+      "rm_name": "socscope"
+    },
+    {
+      "clearing": "config_rm_nanosoc_upy_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_nanosoc_upy_pblock_rp_dut_partial.bin",
+      "rm_id": "0x01000005",
+      "rm_key": "rm_nanosoc_upy",
+      "rm_name": "nanosoc_upy"
+    },
+    {
+      "clearing": "config_rm_clcd_demo_pblock_rp_dut_partial_clear.bin",
+      "partial": "config_rm_clcd_demo_pblock_rp_dut_partial.bin",
+      "rm_id": "0x00010007",
+      "rm_key": "rm_clcd_demo",
+      "rm_name": "clcd_demo"
+    }
+  ],
+  "record_kind": "mint",
+  "reused_dcps": {
+    "reason": "no RM checkpoint was reused: every RM in rm_set was synthesised by this run (REUSE_DCPS_FROM unset)",
+    "value": null
+  },
+  "rm_set": [
+    "rm_greybox",
+    "rm_regdemo_a",
+    "rm_regdemo_b",
+    "rm_led",
+    "rm_uart_echo",
+    "rm_nanosoc",
+    "rm_eth_ss",
+    "rm_nanosoc_multicore",
+    "rm_socscope",
+    "rm_nanosoc_upy",
+    "rm_clcd_demo"
+  ],
+  "schema": "mps3-mint-record",
+  "schema_version": "1.1",
+  "shell_proj": {
+    "reason": null,
+    "value": "fpga/dfx/build_mint_2026_09/shell_proj"
+  },
+  "sources": {
+    "nanosoc_m0_soc": {
+      "reason": null,
+      "value": {
+        "dirty": true,
+        "sha": "c48693ab8956833dfde8cc15833a17f799741bd5"
+      }
+    },
+    "repo": {
+      "reason": null,
+      "value": {
+        "dirty": true,
+        "sha": "cb31b0f2ff293a094fd70f59e2b1753bb4f2dc06"
+      }
+    },
+    "socscope": {
+      "reason": null,
+      "value": {
+        "dirty": false,
+        "sha": "2edd05a2b2093e2b0742bf93660c7dccad548069"
+      }
+    }
+  },
+  "static_canon": {
+    "reason": null,
+    "value": {
+      "digest": "207373d16ca50a72bae9a73d92ec2005e1c38787562890ebd07e81d91f15a95f",
+      "flags": {
+        "SHELL_REALPHY": "0",
+        "SHELL_TOUCH": "1"
+      },
+      "input_count": 40,
+      "inputs": [
+        {
+          "path": "fpga/dfx/build_dfx.tcl",
+          "sha256": "d706ee19de71da50293bc81dd3d48b95a51c51ac1df15c68c39313bbd4253d0b"
+        },
+        {
+          "path": "fpga/dfx/dfx_floorplan.xdc",
+          "sha256": "ad861aa15b88e8707798d62b2b600aabb0ea07f9c7aa2892d633b98add404c79"
+        },
+        {
+          "path": "fpga/dfx/rm_list.tcl",
+          "sha256": "ffc23dcc120b378b7be221bdc4f27773adc7aafef3fae2f593ac6c93bf7e6bef"
+        },
+        {
+          "path": "fpga/dfx/rms/rm_greybox/rm_greybox.sv",
+          "sha256": "68ee63978df7734994b8b98772e9e58ee5c66c2aa1d281f54321cd5aa0e7c573"
+        },
+        {
+          "path": "fpga/dfx/tools/overlay_inputs.tcl",
+          "sha256": "bfd848cb4edf3d33fd8907b27a86a4aff87b7f39cdd6bee1ca8499f600da355c"
+        },
+        {
+          "path": "fpga/ethernet/bridge/eth_bridge_3port.sv",
+          "sha256": "ef25d36e3d18cae31bbb6115b122d83ee3ef092cbf99b034f20d3fe11fd053de"
+        },
+        {
+          "path": "fpga/ethernet/eth_mac_test_subsystem.sv",
+          "sha256": "117e817c0e8854e7325cf7bdabafb3db829780d04af17b5fdabfd27f9df9f0a5"
+        },
+        {
+          "path": "fpga/ethernet/gen_checker/gen_checker.sv",
+          "sha256": "58b4b46aeed7fe2e34fe4a5b2b23ab513559d8d293d836118ec21cb52b011997"
+        },
+        {
+          "path": "fpga/ethernet/link_partner_mac/link_partner_mac.sv",
+          "sha256": "107cda6d7fc76a0a57e18cf5d83a70ab0dc14667023807081af94ad086e67550"
+        },
+        {
+          "path": "fpga/ethernet/mdio_phy_model/mdio_phy_model.sv",
+          "sha256": "71da9ef6f2aad39ac38ce7a9eaf332588e858f347321c342a0387cf0ea302b95"
+        },
+        {
+          "path": "fpga/ethernet/mdio_phy_model/mdio_slave.sv",
+          "sha256": "8aa2370b2b20d5e14137d3162d3839fdbf8e60e2b2f8cef23a6ac050f5c9b578"
+        },
+        {
+          "path": "fpga/ethernet/mdio_phy_model/phy_reg_model.sv",
+          "sha256": "c6ad35ff36958e42b07d126da18c7b59d485b57acaec6aed630153eab41f7ab2"
+        },
+        {
+          "path": "fpga/ethernet/rmii_phy_if/rmii_phy_if.sv",
+          "sha256": "332059c623e6b4fda9e543679381e4aae0efee764aec0e43b23557214a9d9c74"
+        },
+        {
+          "path": "fpga/shell/bd/shell_bd.tcl",
+          "sha256": "bcebc76fb1a8ac2600f5a0e20ea846b65606bc866c53d7ac66d5ebb6e658f578"
+        },
+        {
+          "path": "fpga/shell/bd/touch_iic_add.tcl",
+          "sha256": "590e0301d231b0e702e335ea7f69878caf5c1afecdbd1807bc36b2c5f975fadd"
+        },
+        {
+          "path": "fpga/shell/build_shell.tcl",
+          "sha256": "04e125b77e5e77a66b811ef649ba06fda541ccd68a4164b80e18574942a389e5"
+        },
+        {
+          "path": "fpga/shell/constraints/mps3_harness.xdc",
+          "sha256": "2c0053a11dafe2ca9bf7e6e08ca8ceeb8a65f955655dc487b10c88450d4d9130"
+        },
+        {
+          "path": "fpga/shell/constraints/mps3_harness_timing.xdc",
+          "sha256": "0ce2d8616497d9e6587326ce7938bc6cc8162b81173aebaac1a907465455e396"
+        },
+        {
+          "path": "fpga/shell/constraints/optional/mps3_harness_touch.xdc",
+          "sha256": "4449cdfbdbee6647657eb54e076760b2d9b3a2bec00f0918426f5ae542c35d99"
+        },
+        {
+          "path": "fpga/shell/constraints/optional/services_pblock_proposal.xdc",
+          "sha256": "444b5019fdb5440280bb49459f8f73b5d4ae0e18a8382dd3e3fd89a2ecee0136"
+        },
+        {
+          "path": "fpga/shell/constraints_realphy/mps3_realphy_pins.xdc",
+          "sha256": "300d0dcd71b5d13c5cdcf0509487b3fb81b3ce436e0ee158bd09684cfb479e46"
+        },
+        {
+          "path": "fpga/shell/constraints_realphy/mps3_realphy_timing.xdc",
+          "sha256": "67355d082b1b0bd423cedd18792704723c775f3c7d1ef8d4a302f723eb3f89d1"
+        },
+        {
+          "path": "fpga/shell/ip/board_gpio/board_gpio.sv",
+          "sha256": "b285b710572405699b44adf0b1f7263f82f394236b311d04d4e73fcdba22bbc6"
+        },
+        {
+          "path": "fpga/shell/ip/clcd/clcd.sv",
+          "sha256": "cc25e2f619510f6fba13d5450caa28fab56a603fbd3f29bf974beba5fa6b83f9"
+        },
+        {
+          "path": "fpga/shell/ip/clcd/clcd_core.sv",
+          "sha256": "c775280d35d7bf625fa75d3812f2ca9d11b5fbcf5b44b7e45ebf6d94a9ac95a9"
+        },
+        {
+          "path": "fpga/shell/ip/clcd_kvm/clcd_kvm.sv",
+          "sha256": "159abdc95fe756bf2a1b8987842abc54fb29ba4a3d37f1dec7e230d1e7fd9633"
+        },
+        {
+          "path": "fpga/shell/ip/clkrst/dut_clkrst.sv",
+          "sha256": "3e02510d5b82227a679a2499dfd0e4dbd247be090d1af25d08b14aeb59e34a1f"
+        },
+        {
+          "path": "fpga/shell/ip/dfx_ctl/dfx_ctl.sv",
+          "sha256": "2edf1197cb9808e9fc03016367442ef9c572314c2940d634aeb1f74a99294d5b"
+        },
+        {
+          "path": "fpga/shell/ip/dut_egress/dut_egress.sv",
+          "sha256": "0d68868a60f9b94694ed9d4c79bfb9eabe3a27b48b58f900556660c68cc71b30"
+        },
+        {
+          "path": "fpga/shell/ip/dut_egress/dutegr_cfifo.sv",
+          "sha256": "a9f72d8ee73b676254f173bf0152071318b704850c51ba3c0b79e7f28af2695f"
+        },
+        {
+          "path": "fpga/shell/ip/jtag_bb/jtag_bb.sv",
+          "sha256": "a2974ddfdcdd8ed75e8f78a065e62acf120ab86eb52b83ce8d6b3b6e4b43ec5a"
+        },
+        {
+          "path": "fpga/shell/ip/swd_bb/swd_bb.sv",
+          "sha256": "0197f4b2736cfb89311f2a2cf8211c2544a870be8c4b44a5ad55f27c4c146a4f"
+        },
+        {
+          "path": "fpga/shell/ip/telem/telem.sv",
+          "sha256": "83cefcfdd7a46254f214ef775d02eee887e191ac2fb837c2bb3b99f88dfcbd76"
+        },
+        {
+          "path": "fpga/shell/ip/uart_bridge/swo_uart_rx.sv",
+          "sha256": "5b2f784b7249a14947de9a90fe0230d501c167517f7c37d3322a3f85c3ac1061"
+        },
+        {
+          "path": "fpga/shell/ip/uart_bridge/uart_bridge.sv",
+          "sha256": "cd9f27cf8b4b5c89391d303e3632b9c13a2ac5925ce6f1f8e4c35c37d399e918"
+        },
+        {
+          "path": "fpga/shell/ip/uart_bridge/uartbr_async_fifo.sv",
+          "sha256": "e3cd12ef3ee2e928ecd6f1ca5d880f439a84e074c42a1aa11b347e53851d40a3"
+        },
+        {
+          "path": "fpga/shell/ip/usr_access_rd/usr_access_rd.sv",
+          "sha256": "efd19a3058e4454e7c91cca80b0eeced30996493eebffd95647ca7834b480f6a"
+        },
+        {
+          "path": "fpga/shell/ip_packaged/package_csr_ip.tcl",
+          "sha256": "3e2e0131d4694fe6e0010677ee202105d80c5ed67ed41fd851d1f16281e24419"
+        },
+        {
+          "path": "fpga/shell/rp_dut_stub.sv",
+          "sha256": "5fc89dba78cffeed6ec401626f96bf822077efc82e8935c2bebae304561bd76f"
+        },
+        {
+          "path": "fpga/shell/shell_top.sv",
+          "sha256": "2532a561ce9a2bcdcf4ed635fa57c6b6ec5c9adf1e7fdcec1001216ed7ef7caa"
+        }
+      ],
+      "linked_static_dcp": null,
+      "manifest_bytes": 4395,
+      "part": "xcku115-flvb1760-1-c",
+      "schema": "mps3-static-canon",
+      "schema_version": "1",
+      "short": "207373d16ca5",
+      "vivado": "2024.1"
+    }
+  },
+  "static_id": "0x3F1A560F",
+  "static_usercode": {
+    "reason": null,
+    "value": {
+      "harness_version": {
+        "reason": null,
+        "value": "1.0.0"
+      },
+      "source": "config_rm_greybox.bit header UserID= (agrees with static_stamp.json)",
+      "usercode": "0xD46FCDCB",
+      "usr_access": {
+        "reason": null,
+        "value": "0x01000000"
+      }
+    }
+  },
+  "timestamps": {
+    "overlay_inputs_txt": "2026-09-15T19:44:00Z",
+    "static_id_txt": "2026-09-15T17:13:59Z",
+    "static_routed_locked_dcp": "2026-09-15T17:13:57Z"
+  },
+  "tools": {
+    "vivado": {
+      "reason": null,
+      "value": "2024.1"
+    }
+  }
+}

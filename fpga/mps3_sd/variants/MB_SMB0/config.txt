@@ -1,0 +1,2 @@
+; Key overrides applied to templates/config.txt.
+FPGA_SMB: FALSE

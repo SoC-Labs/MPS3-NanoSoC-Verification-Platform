@@ -1,0 +1,11 @@
+config BR2_PACKAGE_MPS3_LEGACY_DAEMONS
+	bool "mps3-legacy-daemons (v0.7 hand port)"
+	depends on !BR2_PACKAGE_MPS3_HARNESSD
+	help
+	  The July 2026 hand-ported control-plane daemons (net-protocol
+	  v0.7): mps3-ctrld (6900), mps3-pushd (6910), mps3-configd (TFTP
+	  69), mps3-xvcd (2542), mps3-uartbrd (6930-6932), started by
+	  S90mps3d + S91mps3aux. Superseded by mps3-harnessd (DL6); kept
+	  buildable as the LEGACY image variant (build.sh
+	  MPS3_VARIANT=legacy) until the deletion PR. Mutually exclusive
+	  with mps3-harnessd: both bind the same ports.

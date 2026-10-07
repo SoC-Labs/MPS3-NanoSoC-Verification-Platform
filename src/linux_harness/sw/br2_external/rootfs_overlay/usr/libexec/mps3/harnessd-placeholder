@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+# harnessd-placeholder — stands in for /usr/sbin/mps3-harnessd under the
+# inittab respawn line until the HARNESSD package ships its drop-in
+# (IMAGE_CONTRACT §7.1). It does nothing but exist, so supervision (kill ->
+# respawn) can be proven before the real process lands. The image manifest
+# says harnessd_sha256=placeholder while this is installed.
+mkdir -p /run/mps3
+echo $$ > /run/mps3/harnessd.pid
+echo "mps3-harnessd-placeholder: pid $$ (the real harnessd is not in this image)" > /dev/kmsg 2>/dev/null
+exec sleep 2147483647
